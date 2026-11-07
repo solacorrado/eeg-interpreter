@@ -9,6 +9,8 @@ track: *movement-based neurotech applications* on ANT Neuro's 24-channel eego sy
 
 ## How it works
 
+The web version's signal path (the desktop app adds more inputs, see below):
+
 ```
 eego headset ──LSL──▶ server.py ──▶ look detector  (O1, Oz, O2, POz)  ──┐
  24 ch, 500 Hz                  └─▶ jaw detector   (T7, T8, M1, M2)  ──┴─▶ web page (localhost:8780)
@@ -49,62 +51,73 @@ uv run python bci_demo/make_media.py      # make the sample PDF, audio and video
 
 ## Run
 
-There are two versions with the same controls. Pick either one.
+### Desktop app (the full version)
 
-**Desktop app** (a normal window, no browser):
+Double-click the desktop icon, or:
 
 ```bash
-# No headset: a fake one, driven by the keyboard
-uv run python bci_demo/desktop_app.py --fake
-
-# Real eego: connect to ANT's network first
-uv run python bci_demo/desktop_app.py                    # first LSL stream of type EEG
-uv run python bci_demo/desktop_app.py --stream "NAME"    # or pick a stream by name
+uv run python bci_demo/desktop_app.py            # real headset: connect on the start screen
+uv run python bci_demo/desktop_app.py --fake     # start with the practice (fake) headset
 ```
 
-**Web app** (runs in a browser at http://localhost:8780):
+**Start screen**
+1. **Profile:** pick who is wearing the headset, or make a new profile. Each wearer gets
+   their own calibrated settings.
+2. **Headset:** *Real headset* (press **Search** to list LSL streams, or use "first EEG
+   stream"), or *Practice headset* (fake signals). Press **Connect**. The green dot shows
+   the stream, channel count and rate.
+3. Choose **Calibrate & test** or **Use the viewer**.
+
+**Calibrate & test**
+- Tick the inputs to include: flicker (12–15 Hz), jaw clench, eyebrow raise, blink,
+  glance left/right, eyes closed, fist squeeze right/left. All of them take about 5.5 minutes.
+- **Start calibration:** the wearer follows the cues on screen (a beep marks each new step).
+  For every input the app finds the threshold that best separates "doing it" from
+  "resting" and grades it **Good** (≥90%), **OK** (≥75%) or **Poor**. Good and OK
+  inputs update the profile; Poor ones keep their old settings.
+- **Run live test:** random cues; the live detectors (using the profile) must fire the
+  right event in time. Reports hit rate, reaction time and false alarms per minute.
+- **Live signals:** a bar for every signal with the profile's threshold marked, and a
+  light for every detection. Good for checking the headset before you start.
+- With the practice headset, "Practice person follows the cues" makes the fake signals
+  act out each cue, so the whole flow can be tried without hardware. Practice keys:
+  J jaw, E eyebrows, B blink, ← → glance, C eyes closed, R / L fist, 1–4 stare at 12–15 Hz.
+
+**Viewer:** the PDF / audio / video controls below, using the profile's settings.
+
+### What gets saved, and where
+
+Everything goes to **Documents/HandsFreeViewer** (outside the code, so updates and
+re-clones never touch it):
+
+```
+profiles/<name>.json        settings + latest result per input + full history of every session
+profiles/<name>.json.bak    the previous version of that file
+trials/<name>/<date>_calibration|test/
+    eeg.npz                 raw EEG, timestamps, channel names, sample rate
+    features.csv            signal features, 25 rows per second
+    cues.csv / events.csv   what the wearer was asked to do / what the app detected
+    results.json            the scores
+trials/index.csv            one row per input per session: the "what works" log
+```
+
+Profiles record the app version that made each result and carry a schema version, so
+newer app versions can still read them.
+
+### Web app (simple version: flicker + jaw only)
 
 ```bash
-uv run python bci_demo/server.py --fake
+uv run python bci_demo/server.py --fake     # then open http://localhost:8780
 uv run python bci_demo/server.py
 ```
 
-Read the flashing warning and press **OK** (desktop) or **Start** (web). Sit still and
-relax your jaw for the first 3 seconds while it calibrates.
-
-In `--fake` mode, hold **Shift** with an arrow key or `J` to send *fake brain signals*
-through the real detectors (an arrow then takes about a second, like a real look).
-
-Options:
-
-| Flag | Default | What it does |
-|------|---------|--------------|
-| `--pdf FILE` | `bci_demo/media/sample.pdf` | the PDF to show |
-| `--ssvep-threshold` | `0.42` | how strong a look must be. Raise it if arrows fire on their own; lower it if they never fire |
-| `--clench-factor` | `5` | how many times above resting the jaw signal must jump. Raise it if clenches fire too easily |
-| `--port` | `8780` | web page port (web app only) |
-
-The top bar shows live numbers to tune with: each arrow's match score (a look
-needs about 0.42+) and the jaw level (× resting; turns yellow during a clench).
-
-## Files
-
-```
-bci_demo/
-  desktop_app.py  the desktop version (PySide6 / Qt window)
-  server.py       the web version's server; sends events to the page
-  engine.py       reads the LSL stream and runs the detectors (shared by both versions)
-  detect.py       SSVEP (CCA) and jaw-clench detectors
-  fake_eeg.py     simulated 24-channel eego stream for testing without hardware
-  make_media.py   generates the sample PDF, audio and video
-  static/index.html  the web version's page (PDF / Audio / Video tabs, flicker, keyboard)
-```
+Options: `--pdf FILE`, `--ssvep-threshold 0.42`, `--clench-factor 5`, `--port 8780`.
 
 ## Status
 
-- Working end to end against the **simulated** headset.
-- Not yet tested on the real eego. Expect to tune `--ssvep-threshold`, `--clench-factor`
-  and the flicker strength on real data.
+- Working end to end against the **simulated** headset (calibration, live test, viewer).
+- Not yet tested on the real eego. Calibrate each wearer on the real headset; the live
+  test then shows which inputs actually work for them.
 
 ## Safety
 
