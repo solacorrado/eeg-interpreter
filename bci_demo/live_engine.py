@@ -71,19 +71,35 @@ class LiveEngine:
             pass
 
     def _run(self):
-        inlet = None
+        """Keep a connection alive: if the stream goes quiet (eego left its live view, Wi-Fi
+        dropped), drop it and find the stream again, so data resumes without a restart."""
+        self.reconnect_name = None
+        while self.running:
+            self._session()
+            if self.running:
+                self.status.update(connected=False)
+                self._emit({"type": "status", **self.status, "msg": "Stream went quiet — reconnecting…"})
+
+    def _session(self):
+        inlet, tries = None, 0
         while self.running and inlet is None:
+            tries += 1
             if self.source_id:
                 found = resolve_byprop("source_id", self.source_id, timeout=2)
             elif self.target:
                 found = resolve_byprop("name", self.target, timeout=2)
-            else:  # first real EEG stream; never the practice one
-                found = [s for s in resolve_byprop("type", "EEG", timeout=2) if s.name() != "FakeEego"]
+            elif self.reconnect_name and tries <= 3:  # after a drop: look for the same stream first
+                found = resolve_byprop("name", self.reconnect_name, timeout=2)
+            else:  # the most EEG-like real stream; never the practice one
+                found = sorted((s for s in resolve_streams(2) if s.name() != "FakeEego" and s.nominal_srate() > 0
+                                and s.channel_count() >= 4 and "marker" not in s.type().lower()),
+                               key=lambda s: (s.type().strip().lower() != "eeg", -s.channel_count()))
             if found:
                 inlet = StreamInlet(found[0], max_buflen=30, processing_flags=proc_clocksync | proc_dejitter)
             else:
                 self.status["connected"] = False
-                self._emit({"type": "status", **self.status, "msg": "Looking for EEG stream…"})
+                self._emit({"type": "status", **self.status,
+                            "msg": "Reconnecting to the EEG stream…" if self.reconnect_name else "Looking for EEG stream…"})
         if not self.running:
             return
 
@@ -96,50 +112,69 @@ class LiveEngine:
         names = resolve_names(raw_names, n)
         self.info = {"name": info.name(), "rate": rate, "channels": names, "type": info.type(),
                      "names_from_stream": any(raw_names)}
-        self.status.update(connected=True, stream=info.name(), rate=rate, n_channels=n,
-                           names_from_stream=any(raw_names))
+        self.reconnect_name = info.name()
+        pipe = Pipeline(rate, names, self.settings)
+        self.status.update(connected=True, stream=info.name(), stream_type=info.type(), rate=rate, n_channels=n,
+                           names_from_stream=any(raw_names), missing=pipe.fx.missing)
         print(f"Connected to {info.name()!r}: {n} ch @ {rate} Hz; channels: {', '.join(names)}")
-
-        fx, ss = FeatureExtractor(rate, names), SSVEPScorer(rate, names)
+        if pipe.fx.missing:
+            print("Missing channels (using fallbacks):", pipe.fx.missing)
         with self.lock:
-            self.gestures = Gestures(self.settings)
-        scores, last_ss, last_status = {}, -1e9, 0.0
+            self.gestures = pipe.gestures
+        last_status, last_data = 0.0, time.time()
 
         while self.running:
             chunk, ts = inlet.pull_chunk(timeout=0.1)
-            with self.lock:
-                rec, freqs = self.recorder, list(self.freqs)
+            now = time.time()
             if chunk:
+                last_data = now
                 arr, tsa = np.asarray(chunk, dtype=float), np.asarray(ts, dtype=float)
+                with self.lock:
+                    rec, freqs = self.recorder, list(self.freqs)
+                    rows, evs = pipe.process(arr, tsa, freqs)
                 if rec:
                     rec.add_raw(arr, tsa)
-                ss.add(arr)
-                for row in fx.process(arr, tsa):
-                    for f, v in scores.items():
-                        row[f"ss_{fkey(f)}"] = v
-                    with self.lock:
-                        evs = self.gestures.update(row)
-                    if rec:
+                    for row in rows:
                         rec.add_row(row)
-                    for e in evs:
-                        if rec:
-                            rec.add_event(e)
-                        self._emit(e)
-                t_last = float(tsa[-1])
-                if t_last - last_ss >= 0.25:
-                    last_ss = t_last
-                    scores = ss.scores(freqs)
-                    with self.lock:
-                        evs = self.gestures.update_ssvep(t_last, scores)
-                    for e in evs:
-                        if rec:
-                            rec.add_event(e)
-                        self._emit(e)
-            now = time.time()
+                for e in evs:
+                    if rec:
+                        rec.add_event(e)
+                    self._emit(e)
+            if now - last_data > 5:  # quiet for 5 s: reconnect
+                print(f"No data for {now - last_data:.0f} s from {info.name()!r}; reconnecting")
+                break
             if now - last_status >= 0.1:
                 last_status = now
-                feats = {k: round(v, 3) for k, v in (fx.last or {}).items() if k != "t"}
-                self._emit({"type": "status", **self.status, "calibrating": fx.calibrating,
-                            "clenching": self.gestures.jaw.active, "features": feats,
-                            "scores": {fkey(f): round(v, 3) for f, v in scores.items()}})
+                feats = {k: round(v, 3) for k, v in (pipe.fx.last or {}).items() if k != "t"}
+                self._emit({"type": "status", **self.status, "calibrating": pipe.fx.calibrating,
+                            "stalled": round(now - last_data, 1) if now - last_data > 2 else 0,
+                            "clenching": pipe.gestures.jaw.active, "features": feats,
+                            "scores": {fkey(f): round(v, 3) for f, v in pipe.scores.items()}})
         inlet.close_stream()
+
+
+class Pipeline:
+    """Raw EEG chunks -> feature rows + events. Used live (LiveEngine) and offline
+    (reanalyze.py), so re-analysing a saved trial gives exactly what the app saw."""
+
+    def __init__(self, rate, names, settings):
+        self.fx = FeatureExtractor(rate, names)
+        self.ss = SSVEPScorer(rate, names)
+        self.gestures = Gestures(settings)
+        self.scores = {}
+        self.last_ss = -1e9
+
+    def process(self, arr, tsa, freqs):
+        rows, events = [], []
+        self.ss.add(arr)
+        for row in self.fx.process(arr, tsa):
+            for f, v in self.scores.items():
+                row[f"ss_{fkey(f)}"] = v
+            rows.append(row)
+            events += self.gestures.update(row)
+        t_last = float(tsa[-1])
+        if t_last - self.last_ss >= 0.25:
+            self.last_ss = t_last
+            self.scores = self.ss.scores(freqs)
+            events += self.gestures.update_ssvep(t_last, self.scores)
+        return rows, events

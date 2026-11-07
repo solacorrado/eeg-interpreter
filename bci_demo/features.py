@@ -14,6 +14,7 @@ counted from the samples themselves, so data that arrives late is still timed ri
 
 SSVEPScorer separately scores how well the back of the head matches each flicker rate.
 """
+import re
 from collections import deque
 
 import numpy as np
@@ -24,27 +25,53 @@ from detect import cca_corr
 DEFAULT_24 = ["Fp1", "Fpz", "Fp2", "F7", "F3", "Fz", "F4", "F8", "M1", "T7", "C3", "Cz",
               "C4", "T8", "M2", "P7", "P3", "Pz", "P4", "P8", "POz", "O1", "Oz", "O2"]
 GROUPS = {
-    "occ": ["O1", "Oz", "O2", "POz"],
-    "temporal": ["T7", "T8", "M1", "M2"],
+    # visual area for flicker; Pz/P3/P4 help on caps without Oz/POz (e.g. ANT's 24-ch layout with F9/T9/P9)
+    "occ": ["O1", "Oz", "O2", "POz", "PO7", "PO8", "Pz", "P3", "P4"],
+    # jaw muscle: T9/T10 sit right over it on caps that have them
+    "temporal": ["T7", "T8", "T9", "T10", "M1", "M2"],
     "frontal": ["Fp1", "Fpz", "Fp2", "F7", "F8"],
     "fp": ["Fp1", "Fpz", "Fp2"],
 }
 FEATURES = ["jaw", "brow", "blink", "heog", "alpha", "mu_l", "mu_r"]
 
 
+NON_EEG = ("TRIG", "STATUS", "COUNTER", "MARKER", "EVENT", "STIM", "BIP", "AUX", "ACC", "GSR", "EOG", "EMG", "ECG")
+
+
+def norm_label(label):
+    """'EEG Fp1-CPz', 'fp1', 'Fp1 (ref)' -> 'FP1', so names match however the stream writes them."""
+    s = re.sub(r"^(EEG|EXG|CH)[\s_:-]*", "", str(label).strip().upper())
+    return re.split(r"[\s\-_/(:]", s)[0] if s else ""
+
+
 def resolve_names(names, n):
-    """Channel names from the stream; if it sends none, assume the standard eego 24 layout."""
+    """Channel names from the stream; if it sends none, assume the standard eego 24 layout
+    (for 24 channels, or 24 EEG channels followed by trigger/counter channels)."""
     names = list(names or [])
     if len(names) == n and any(names):
         return names
-    if n == 24:
-        return list(DEFAULT_24)
+    if n >= 24 and n <= 26:
+        return list(DEFAULT_24) + [f"extra{i}" for i in range(n - 24)]
     return [f"ch{i}" for i in range(n)]
 
 
+def find(names, label):
+    want = norm_label(label)
+    for i, nm in enumerate(names):
+        if norm_label(nm) == want:
+            return i
+    return None
+
+
+def eeg_indices(names):
+    """Channels that look like EEG (not trigger, counter, bipolar, ...)."""
+    return [i for i, nm in enumerate(names) if not any(k in str(nm).upper() for k in NON_EEG)
+            and not str(nm).startswith("extra")] or list(range(len(names)))
+
+
 def pick(names, wanted):
-    idx = [names.index(w) for w in wanted if w in names]
-    return idx or list(range(len(names)))
+    idx = [i for w in wanted if (i := find(names, w)) is not None]
+    return idx or eeg_indices(names)
 
 
 class StreamFilter:
@@ -110,8 +137,8 @@ class FeatureExtractor:
         self.names = names
         self.ch_occ, self.ch_tmp = pick(names, GROUPS["occ"]), pick(names, GROUPS["temporal"])
         self.ch_front, self.ch_fp = pick(names, GROUPS["frontal"]), pick(names, GROUPS["fp"])
-        ix = lambda n: names.index(n) if n in names else None
-        self.f7, self.f8, self.c3, self.c4 = ix("F7"), ix("F8"), ix("C3"), ix("C4")
+        self.f7, self.f8, self.c3, self.c4 = (find(names, n) for n in ("F7", "F8", "C3", "C4"))
+        self.missing = [g for g, w in GROUPS.items() if not any(find(names, x) is not None for x in w)] +                        [n for n in ("F7", "F8", "C3", "C4") if find(names, n) is None]
 
         hi = min(100.0, rate * 0.45)
         emg = butter(4, [30, hi], btype="band", fs=rate, output="sos")
@@ -133,17 +160,24 @@ class FeatureExtractor:
         self.calib_s = calib_s
         self.n = 0
         self.last = None
+        self._held, self._held_ts = None, None
 
     @property
     def calibrating(self):
         return self.n / self.rate < self.calib_s
 
     def process(self, chunk, ts):
-        """chunk: samples x channels, ts: one timestamp per sample. Returns feature rows."""
+        """chunk: samples x channels, ts: one timestamp per sample. Returns feature rows.
+        Samples are cut into exact 40 ms steps (leftovers wait for the next chunk), so the
+        result is the same however the stream happens to split its data."""
+        if self._held is not None:
+            chunk = np.vstack([self._held, chunk])
+            ts = np.concatenate([self._held_ts, ts])
         rows = []
-        for i in range(0, len(chunk), self.step_n):
-            j = min(i + self.step_n, len(chunk))
-            rows.append(self._step(chunk[i:j], float(ts[j - 1])))
+        full = len(chunk) - len(chunk) % self.step_n
+        for i in range(0, full, self.step_n):
+            rows.append(self._step(chunk[i:i + self.step_n], float(ts[i + self.step_n - 1])))
+        self._held, self._held_ts = (chunk[full:], ts[full:]) if full < len(chunk) else (None, None)
         return rows
 
     def _step(self, x, t):

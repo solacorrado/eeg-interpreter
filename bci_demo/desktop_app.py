@@ -17,6 +17,7 @@ Data (profiles, trials) is saved in Documents/HandsFreeViewer.
 """
 import argparse
 import math
+import os
 import random
 import sys
 import time
@@ -31,7 +32,12 @@ from PySide6.QtGui import QColor, QDesktopServices, QFont, QIcon, QImage, QPaint
 from PySide6.QtCore import QPointF
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer, QSoundEffect
 from PySide6.QtMultimediaWidgets import QVideoWidget
-from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout,
+try:
+    from PySide6.QtTextToSpeech import QTextToSpeech
+except ImportError:  # speech is optional
+    QTextToSpeech = None
+from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QComboBox, QFileDialog, QFrame, QGridLayout,
+                               QHBoxLayout,
                                QHeaderView, QInputDialog, QLabel, QLineEdit, QMainWindow, QMessageBox, QProgressBar,
                                QPushButton, QRadioButton, QSlider, QStackedWidget, QTableWidget, QTableWidgetItem,
                                QTabWidget, QVBoxLayout, QWidget)
@@ -108,6 +114,9 @@ def status_html(m):
     if not m or not m.get("connected"):
         msg = (m or {}).get("msg", "Not connected")
         return f"<span style='color:{BAD}'>●</span> {msg}"
+    if m.get("stalled"):
+        return (f"<span style='color:{BAD}'>● NO DATA for {m['stalled']:.0f} s</span> from {m['stream']} — "
+                "check the Wi-Fi / that eego is still streaming (it reconnects by itself)")
     f = m.get("features", {})
     calib = " · <b>calibrating, stay still</b>" if m.get("calibrating") else ""
     jaw = f.get("jaw")
@@ -125,7 +134,9 @@ class Bridge(QObject):
 
 # =========================================================================== viewer pieces
 GLYPH = {"up": "▲", "right": "▶", "down": "▼", "left": "◀", "back": "◀◀ 15", "fwd": "15 ▶▶"}
-FREQ = {"up": 12, "right": 13, "down": 14, "left": 15, "back": 12, "fwd": 15}
+# Defaults = the best, well-spaced rates on the first real recording (Sola: 92-100% each).
+# Each profile can override them with settings["viewer_rates"].
+FREQ = {"up": 13.0, "right": 9.0, "down": 15.0, "left": 11.0, "back": 9.0, "fwd": 13.0}
 TABS = ["pdf", "audio", "video"]
 TAB_ACTS = {"pdf": ["up", "right", "down", "left"], "audio": [], "video": ["back", "fwd"]}
 PDF_KEYS = {Qt.Key_Up: "up", Qt.Key_Right: "right", Qt.Key_Down: "down", Qt.Key_Left: "left"}
@@ -176,7 +187,7 @@ class FlickerTarget(QWidget):
         p.drawText(r, Qt.AlignCenter, GLYPH[self.act])
         p.setPen(QColor(MUTED))
         p.setFont(QFont("Segoe UI", 9))
-        p.drawText(r.adjusted(0, 0, 0, -6), Qt.AlignHCenter | Qt.AlignBottom, f"{self.freq} Hz")
+        p.drawText(r.adjusted(0, 0, 0, -6), Qt.AlignHCenter | Qt.AlignBottom, f"{self.freq:g} Hz")
 
 
 class PdfView(QWidget):
@@ -189,6 +200,15 @@ class PdfView(QWidget):
         self.shown = [0.0, 0.0, 0.0]
         self.arrows_on = True
         self.setMinimumSize(200, 200)
+
+    def load(self, path):
+        """Show a different PDF (from Open file / drag-and-drop)."""
+        doc = pdfium.PdfDocument(str(path))
+        if len(doc) == 0:
+            raise ValueError("the PDF has no pages")
+        self.doc, self.pages, self.cache = doc, len(doc), {}
+        self.page, self.zoom, self.x, self.y = 0, 1.0, 0.0, 0.0
+        self.clamp(snap=True)
 
     def image(self, i):
         if i not in self.cache:
@@ -291,7 +311,34 @@ def top_bar(title, on_home):
 
 
 # =========================================================================== viewer page
+PDF_EXT = {".pdf"}
+AUDIO_EXT = {".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac", ".wma"}
+VIDEO_EXT = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v", ".wmv"}
+OPEN_FILTER = ("Documents and media (*.pdf *.mp3 *.wav *.m4a *.ogg *.flac *.aac *.wma *.mp4 *.mov *.mkv *.avi "
+               "*.webm *.m4v *.wmv);;PDF (*.pdf);;Audio (*.mp3 *.wav *.m4a *.ogg *.flac *.aac *.wma);;"
+               "Video (*.mp4 *.mov *.mkv *.avi *.webm *.m4v *.wmv)")
+VIEWER_STYLE = f"""
+QPushButton#bigtab {{ font-size:15pt; padding:10px 22px; border-radius:10px; min-height:44px; }}
+QPushButton#bigtab:checked {{ background:#1d3326; border:2px solid {ACCENT}; }}
+QPushButton#bigctl {{ font-size:16pt; padding:12px 18px; border-radius:12px; min-height:58px;
+                      background:{PANEL}; border:2px solid {LINE}; }}
+QPushButton#bigctl:hover {{ border-color:{ACCENT}; }}
+QPushButton#bigopen {{ font-size:15pt; padding:10px 22px; border-radius:10px; min-height:44px;
+                       background:{ACCENT}; color:#08110c; border:none; font-weight:700; }}
+QPushButton#bighome {{ font-size:14pt; padding:10px 18px; border-radius:10px; min-height:44px; }}
+QLabel#filename {{ font-size:13pt; color:{TEXT}; background:transparent; padding:4px 2px; }}
+"""
+
+
+def kind_of(path):
+    ext = Path(path).suffix.lower()
+    return "pdf" if ext in PDF_EXT else "audio" if ext in AUDIO_EXT else "video" if ext in VIDEO_EXT else None
+
+
 class ViewerPage(QWidget):
+    """Big, easy controls. Flicker arrows + jaw clench (what worked best on real data), plus large
+    buttons anyone can click, and Open file / drag-and-drop for your own PDFs, audio and videos."""
+
     def __init__(self, main, pdf_path):
         super().__init__()
         self.main = main
@@ -299,36 +346,37 @@ class ViewerPage(QWidget):
         self.last_clench = 0.0
         self.j_down = self.j_held = self.j_via_eeg = False
         self.look_key = None
+        self.files = {"pdf": str(pdf_path), "audio": str(HERE / "static" / "media" / "sample_audio.wav"),
+                      "video": str(HERE / "static" / "media" / "sample_video.mp4")}
+        self.setStyleSheet(VIEWER_STYLE)
+        self.setAcceptDrops(True)
 
-        bar, top = top_bar("Viewer", lambda: main.go("start"))
+        # ---- top bar: home, three big tabs, open file
+        bar = QWidget(objectName="bar")
+        top = QHBoxLayout(bar)
+        top.setContentsMargins(14, 10, 14, 10)
+        top.setSpacing(10)
+        home = QPushButton("⌂  Home", objectName="bighome")
+        home.clicked.connect(lambda: main.go("start"))
+        top.addWidget(home)
+        top.addSpacing(8)
         self.tab_buttons = QButtonGroup(self)
-        for i, name in enumerate(TABS):
-            b = QPushButton(name.upper() if name == "pdf" else name.capitalize(), checkable=True)
-            b.setFocusPolicy(Qt.NoFocus)
+        for i, label in enumerate(["📄  Read", "🎵  Listen", "🎬  Watch"]):
+            b = QPushButton(label, objectName="bigtab", checkable=True)
             self.tab_buttons.addButton(b, i)
             top.addWidget(b)
         self.tab_buttons.button(0).setChecked(True)
         self.tab_buttons.idClicked.connect(lambda i: self.set_tab(TABS[i]))
-        top.addSpacing(16)
-        top.addWidget(QLabel("Flicker"))
-        self.slider = QSlider(Qt.Horizontal, minimum=10, maximum=100, singleStep=5, pageStep=10)
-        self.slider.setFixedWidth(120)
-        self.slider.setFocusPolicy(Qt.NoFocus)
-        self.slider.setToolTip("Lower = gentler on the eyes, but a weaker brain signal")
-        self.strength_label = QLabel()
-        self.slider.valueChanged.connect(self.set_strength)
-        top.addWidget(self.slider)
-        top.addWidget(self.strength_label)
-        top.addSpacing(10)
-        top.addWidget(QLabel("Style"))
-        self.style_box = QComboBox()
-        self.style_box.addItems(["Soft glow", "Box"])
-        self.style_box.setFocusPolicy(Qt.NoFocus)
-        self.style_box.currentIndexChanged.connect(self.set_style)
-        top.addWidget(self.style_box)
+        top.addSpacing(8)
+        open_btn = QPushButton("📂  Open file", objectName="bigopen")
+        open_btn.setToolTip("Open your own PDF, audio or video (or drag a file onto this window)")
+        open_btn.clicked.connect(self.open_dialog)
+        top.addWidget(open_btn)
         top.addStretch(1)
         self.status = QLabel()
         top.addWidget(self.status)
+        for w in bar.findChildren(QPushButton):
+            w.setFocusPolicy(Qt.NoFocus)
 
         self.targets = {a: FlickerTarget(a) for a in FREQ}
         for t in self.targets.values():
@@ -337,11 +385,34 @@ class ViewerPage(QWidget):
         self.stack.addWidget(self.build_pdf(pdf_path))
         self.stack.addWidget(self.build_audio())
         self.stack.addWidget(self.build_video())
+
+        # ---- bottom: what the jaw does here, and flicker comfort settings (small, out of the way)
+        foot = QWidget(objectName="bar")
+        fl = QHBoxLayout(foot)
+        fl.setContentsMargins(14, 4, 14, 4)
+        self.hint = QLabel(objectName="hint")
+        fl.addWidget(self.hint, 1)
+        fl.addWidget(QLabel("Flicker"))
+        self.slider = QSlider(Qt.Horizontal, minimum=10, maximum=100, singleStep=5, pageStep=10)
+        self.slider.setFixedWidth(120)
+        self.slider.setToolTip("Lower = gentler on the eyes, but a weaker brain signal")
+        self.strength_label = QLabel()
+        self.slider.valueChanged.connect(self.set_strength)
+        fl.addWidget(self.slider)
+        fl.addWidget(self.strength_label)
+        self.style_box = QComboBox()
+        self.style_box.addItems(["Soft glow", "Box"])
+        self.style_box.currentIndexChanged.connect(self.set_style)
+        fl.addWidget(self.style_box)
+        for w in (self.slider, self.style_box):
+            w.setFocusPolicy(Qt.NoFocus)
+
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
         lay.addWidget(bar)
         lay.addWidget(self.stack, 1)
+        lay.addWidget(foot)
 
         self.toast_label = QLabel(self, objectName="toast")
         self.toast_label.hide()
@@ -350,10 +421,29 @@ class ViewerPage(QWidget):
         self.hold_timer = QTimer(self, singleShot=True, timeout=self.j_hold_fired)
 
     # ---------- building
+    @staticmethod
+    def big_button(text, fn):
+        b = QPushButton(text, objectName="bigctl")
+        b.setFocusPolicy(Qt.NoFocus)
+        b.clicked.connect(fn)
+        return b
+
+    @staticmethod
+    def controls(buttons):
+        row = QHBoxLayout()
+        row.setSpacing(12)
+        for b in buttons:
+            row.addWidget(b, 1)
+        return row
+
     def build_pdf(self, pdf_path):
         w = QWidget()
-        g = QGridLayout(w)
-        g.setContentsMargins(12, 12, 12, 12)
+        v = QVBoxLayout(w)
+        v.setContentsMargins(12, 8, 12, 12)
+        v.setSpacing(8)
+        self.pdf_name = QLabel(objectName="filename")
+        v.addWidget(self.pdf_name)
+        g = QGridLayout()
         g.setSpacing(10)
         self.pdf = PdfView(pdf_path)
         g.addWidget(self.targets["up"], 0, 1)
@@ -362,58 +452,148 @@ class ViewerPage(QWidget):
         g.addWidget(self.targets["right"], 1, 2)
         g.addWidget(self.targets["down"], 2, 1)
         for i in (0, 2):
-            g.setRowMinimumHeight(i, 110)
-            g.setColumnMinimumWidth(i, 110)
+            g.setRowMinimumHeight(i, 120)
+            g.setColumnMinimumWidth(i, 130)
         g.setRowStretch(1, 1)
         g.setColumnStretch(1, 1)
+        v.addLayout(g, 1)
+        self.btn_arrows = self.big_button("👁  Arrows: ON", lambda: self.set_arrows(not self.pdf.arrows_on))
+        v.addLayout(self.controls([
+            self.big_button("⟨  Previous page", lambda: self.pdf.go_page(self.pdf.page - 1)),
+            self.big_button("🔍  Zoom in / out", self.zoom_button),
+            self.btn_arrows,
+            self.big_button("Next page  ⟩", lambda: self.pdf.go_page(self.pdf.page + 1)),
+        ]))
         return w
 
     def build_audio(self):
         w = QWidget()
         v = QVBoxLayout(w)
+        v.setContentsMargins(12, 8, 12, 12)
+        self.audio_name = QLabel(objectName="filename")
+        v.addWidget(self.audio_name)
         v.addStretch(1)
         self.a_icon = QLabel("▶", objectName="big_icon", alignment=Qt.AlignCenter)
-        self.a_time = QLabel("0:00", objectName="hint", alignment=Qt.AlignCenter)
+        self.a_time = QLabel("0:00", alignment=Qt.AlignCenter)
+        self.a_time.setStyleSheet("font-size:16pt;")
         self.a_bar = QSlider(Qt.Horizontal, enabled=False)
-        self.a_bar.setFixedWidth(500)
+        self.a_bar.setFixedWidth(560)
         v.addWidget(self.a_icon)
         v.addWidget(self.a_bar, alignment=Qt.AlignCenter)
         v.addWidget(self.a_time)
-        v.addWidget(QLabel("Clench twice quickly to play / pause · clench once to go back 15 s",
-                           objectName="hint", alignment=Qt.AlignCenter))
         v.addStretch(1)
+        self.btn_audio_play = self.big_button("▶  Play", lambda: self.toast(self.toggle(self.audio).capitalize()))
+        v.addLayout(self.controls([
+            self.big_button("⏪  Back 15 s", lambda: (self.skip(self.audio, -15000), self.toast("Back 15 s"))),
+            self.btn_audio_play,
+            self.big_button("Forward 15 s  ⏩", lambda: (self.skip(self.audio, 15000), self.toast("Forward 15 s"))),
+        ]))
         self.audio = QMediaPlayer(self)
         self.audio_out = QAudioOutput(self)
         self.audio.setAudioOutput(self.audio_out)
-        self.audio.setSource(QUrl.fromLocalFile(str(HERE / "static" / "media" / "sample_audio.wav")))
-        self.audio.setLoops(QMediaPlayer.Infinite)
         self.audio.positionChanged.connect(self.audio_progress)
-        self.audio.playbackStateChanged.connect(
-            lambda s: self.a_icon.setText("❚❚" if s == QMediaPlayer.PlayingState else "▶"))
+        self.audio.playbackStateChanged.connect(self.audio_state)
+        self.load_audio(self.files["audio"])
         return w
 
     def build_video(self):
         w = QWidget()
-        h = QHBoxLayout(w)
-        h.setContentsMargins(12, 12, 12, 12)
+        v = QVBoxLayout(w)
+        v.setContentsMargins(12, 8, 12, 12)
+        v.setSpacing(8)
+        self.video_name = QLabel(objectName="filename")
+        v.addWidget(self.video_name)
+        h = QHBoxLayout()
         h.setSpacing(12)
-        self.targets["back"].setFixedWidth(150)
-        self.targets["fwd"].setFixedWidth(150)
+        self.targets["back"].setFixedWidth(160)
+        self.targets["fwd"].setFixedWidth(160)
         vw = QVideoWidget()
         vw.setFocusPolicy(Qt.NoFocus)
         self.video = QMediaPlayer(self)
         self.video_out = QAudioOutput(self)
         self.video.setAudioOutput(self.video_out)
         self.video.setVideoOutput(vw)
-        self.video.setSource(QUrl.fromLocalFile(str(HERE / "static" / "media" / "sample_video.mp4")))
+        self.video.playbackStateChanged.connect(self.video_state)
         h.addWidget(self.targets["back"])
         h.addWidget(vw, 1)
         h.addWidget(self.targets["fwd"])
+        v.addLayout(h, 1)
+        self.btn_video_play = self.big_button("▶  Play", lambda: self.toast(self.toggle(self.video).capitalize()))
+        v.addLayout(self.controls([
+            self.big_button("⏪  Back 15 s", lambda: self.act("back")),
+            self.btn_video_play,
+            self.big_button("Forward 15 s  ⏩", lambda: self.act("fwd")),
+        ]))
+        self.load_video(self.files["video"])
         return w
 
+    # ---------- files
+    def open_dialog(self):
+        start = str(Path(self.files.get(self.tab) or Path.home()).parent)
+        path, _ = QFileDialog.getOpenFileName(self, "Open a PDF, audio or video file", start, OPEN_FILTER)
+        if path:
+            self.open_path(path)
+
+    def open_path(self, path, remember=True):
+        kind = kind_of(path)
+        if not kind:
+            QMessageBox.warning(self, "Can't open", f"{Path(path).name} isn't a PDF, audio or video file.")
+            return False
+        try:
+            {"pdf": self.load_pdf, "audio": self.load_audio, "video": self.load_video}[kind](path)
+        except Exception as e:
+            QMessageBox.warning(self, "Can't open", f"Couldn't open {Path(path).name}:\n{e}")
+            return False
+        if remember:
+            self.main.profile.settings.setdefault("last_files", {})[kind] = str(path)
+            self.main.profile.save()
+        self.set_tab(kind)
+        self.toast(f"Opened {Path(path).name}")
+        return True
+
+    def load_pdf(self, path):
+        self.pdf.load(path)
+        self.files["pdf"] = str(path)
+        self.pdf_name.setText(f"📄  {Path(path).name}")
+
+    def load_audio(self, path):
+        self.audio.stop()
+        self.audio.setSource(QUrl.fromLocalFile(str(path)))
+        self.audio.setLoops(QMediaPlayer.Infinite if "sample_audio" in str(path) else 1)
+        self.files["audio"] = str(path)
+        self.audio_name.setText(f"🎵  {Path(path).name}")
+
+    def load_video(self, path):
+        self.video.stop()
+        self.video.setSource(QUrl.fromLocalFile(str(path)))
+        self.files["video"] = str(path)
+        self.video_name.setText(f"🎬  {Path(path).name}")
+
+    def dragEnterEvent(self, e):
+        if e.mimeData().hasUrls() and any(kind_of(u.toLocalFile()) for u in e.mimeData().urls()):
+            e.acceptProposedAction()
+
+    def dropEvent(self, e):
+        for u in e.mimeData().urls():
+            if kind_of(u.toLocalFile()):
+                self.open_path(u.toLocalFile())
+
     # ---------- page life
+    def apply_rates(self):
+        """Flicker rates come from the profile (defaults = what worked best on real data)."""
+        for act, f in self.main.profile.settings.get("viewer_rates", {}).items():
+            if act in FREQ:
+                FREQ[act] = float(f)
+                self.targets[act].freq = float(f)
+                self.targets[act].update()
+
     def activate(self):
         s = self.main.profile.settings
+        self.apply_rates()
+        for kind, path in (s.get("last_files") or {}).items():
+            if path and Path(path).exists() and path != self.files.get(kind):
+                self.open_path(path, remember=False)
+        self.pdf_name.setText(f"📄  {Path(self.files['pdf']).name}")
         self.slider.blockSignals(True)
         self.slider.setValue(int(round(s["flicker_strength"] * 100)))
         self.slider.blockSignals(False)
@@ -439,10 +619,11 @@ class ViewerPage(QWidget):
     def toast(self, msg):
         self.toast_label.setText(msg)
         self.toast_label.adjustSize()
-        self.toast_label.move((self.width() - self.toast_label.width()) // 2, self.height() - self.toast_label.height() - 24)
+        self.toast_label.move((self.width() - self.toast_label.width()) // 2,
+                              self.height() - self.toast_label.height() - 120)
         self.toast_label.show()
         self.toast_label.raise_()
-        self.toast_timer.start(1300)
+        self.toast_timer.start(1500)
 
     def set_strength(self, v):
         Flicker.strength = v / 100
@@ -467,6 +648,10 @@ class ViewerPage(QWidget):
             self.audio.pause()
         if name != "video":
             self.video.pause()
+        self.hint.setText({
+            "pdf": "Look at a glowing arrow to scroll · jaw: clench twice = arrows on/off, hold 1 s = zoom",
+            "audio": "Jaw: clench twice = play / pause · clench once = back 15 s",
+            "video": "Look at a glowing arrow to skip 15 s · jaw: clench = play / pause"}[name])
         self.send_targets()
 
     def audio_progress(self, pos):
@@ -475,6 +660,14 @@ class ViewerPage(QWidget):
         self.a_bar.setValue(pos)
         fmt = lambda ms: f"{ms // 60000}:{ms // 1000 % 60:02d}"
         self.a_time.setText(f"{fmt(pos)} / {fmt(dur)}")
+
+    def audio_state(self, s):
+        playing = s == QMediaPlayer.PlayingState
+        self.a_icon.setText("❚❚" if playing else "▶")
+        self.btn_audio_play.setText("❚❚  Pause" if playing else "▶  Play")
+
+    def video_state(self, s):
+        self.btn_video_play.setText("❚❚  Pause" if s == QMediaPlayer.PlayingState else "▶  Play")
 
     @staticmethod
     def toggle(player):
@@ -490,6 +683,9 @@ class ViewerPage(QWidget):
     def audio_back(self):
         self.skip(self.audio, -15000)
         self.toast("Back 15 s")
+
+    def zoom_button(self):
+        self.toast("Zoomed in" if self.pdf.toggle_zoom() else "Zoomed out")
 
     # ---------- actions and gestures
     def act(self, name):
@@ -509,8 +705,9 @@ class ViewerPage(QWidget):
             self.targets[a].off = not on
             self.targets[a].update()
         self.pdf.update()
+        self.btn_arrows.setText("👁  Arrows: ON" if on else "👁  Arrows: OFF")
         self.send_targets()
-        self.toast("Double clench → arrows ON" if on else "Double clench → arrows OFF (read in peace)")
+        self.toast("Arrows ON" if on else "Arrows OFF (read in peace)")
 
     def clench(self):
         now = time.monotonic() * 1000
@@ -524,12 +721,12 @@ class ViewerPage(QWidget):
         elif self.tab == "audio":
             self.single_timer.stop()
             if is_double:
-                self.toast(f"Double clench → {self.toggle(self.audio)} audio")
+                self.toast(f"Double clench → {self.toggle(self.audio)}")
             else:
                 self.toast("Back 15 s… (clench again now to play/pause instead)")
                 self.single_timer.start(DOUBLE_MS)
         else:
-            self.toast(f"Clench → {self.toggle(self.video)} video")
+            self.toast(f"Clench → {self.toggle(self.video)}")
 
     def hold(self):
         self.last_clench = 0.0
@@ -617,6 +814,11 @@ class CueCanvas(QWidget):
         self.text, self.flicker, self.arrow, self.phase = step.text, step.flicker, step.arrow, step.phase
         self.update()
 
+    def show_listen(self, step):
+        """While the voice reads the instruction: text and dot only, no flicker or arrow yet."""
+        self.text, self.sub, self.flicker, self.arrow, self.phase = step.text, "listen…", None, None, "rest"
+        self.update()
+
     def set_message(self, text, sub=""):
         self.text, self.sub, self.flicker, self.arrow, self.phase = text, sub, None, None, "idle"
         self.update()
@@ -674,7 +876,7 @@ class MeterPanel(QWidget):
         super().__init__()
         self.main = main
         self.values = {}
-        self.setMinimumHeight(len(METERS) * 26 + 8)
+        self.setMinimumHeight(len(METERS) * 21 + 8)
 
     def set_values(self, feats, scores):
         self.values = dict(feats)
@@ -695,7 +897,7 @@ class MeterPanel(QWidget):
         s = self.main.profile.settings
         x0, w = 150, self.width() - 150 - 60
         for i, (label, key, scale, lo, hi, thr_key) in enumerate(METERS):
-            y = 6 + i * 26
+            y = 4 + i * 21
             p.setPen(QColor(MUTED))
             p.setFont(QFont("Segoe UI", 9))
             p.drawText(QRectF(4, y, 144, 20), Qt.AlignVCenter | Qt.AlignLeft, label)
@@ -746,10 +948,10 @@ class EventTiles(QWidget):
         self.tiles, self.counts = {}, {}
         for i, (key, label) in enumerate(EVENT_TILES):
             t = QLabel(label, alignment=Qt.AlignCenter)
-            t.setMinimumHeight(34)
+            t.setMinimumHeight(28)
             self.tiles[key], self.counts[key] = t, 0
             self._style(key, False)
-            g.addWidget(t, i // 3, i % 3)
+            g.addWidget(t, i // 4, i % 4)
 
     def _style(self, key, lit):
         self.tiles[key].setStyleSheet(
@@ -776,6 +978,30 @@ class EventTiles(QWidget):
 FAKE_KEYS = {Qt.Key_J: "clench", Qt.Key_E: "brow", Qt.Key_Left: "glance_left", Qt.Key_Right: "glance_right",
              Qt.Key_C: "eyes_closed", Qt.Key_R: "fist_right", Qt.Key_L: "fist_left"}
 FAKE_LOOK_KEYS = {Qt.Key_1: 12, Qt.Key_2: 13, Qt.Key_3: 14, Qt.Key_4: 15}
+
+
+def spoken(step):
+    """Short phrase to read aloud, so the wearer doesn't have to read the screen."""
+    if step.phase == "settle":
+        return "Relax and sit still."
+    if step.phase == "rest":
+        return "Open your eyes. Relax." if step.input == "eyes_closed" else "Relax."
+    t = step.text
+    if step.input == "ssvep":
+        return "Stare at the circle."
+    if step.input == "glance":
+        return f"Look {step.cls}, then back."
+    if step.input == "fist":
+        return f"Squeeze your {step.cls} fist."
+    if step.input == "eyes_closed":
+        return "Close your eyes."
+    if step.input == "blink":
+        return "Blink twice." if step.cls == "double" else "Blink once."
+    if step.input == "jaw":
+        return "Clench and hold." if step.cls == "hold" else "Clench your jaw."
+    if step.input == "brow":
+        return "Raise your eyebrows."
+    return t
 
 
 class CalibPage(QWidget):
@@ -809,15 +1035,25 @@ class CalibPage(QWidget):
         lv.addWidget(self.total)
         lv.addSpacing(8)
         self.btn_cal = QPushButton("Start calibration", objectName="primary")
+        self.btn_redo = QPushButton("Redo Poor inputs only")
+        self.btn_redo.setToolTip("Tick only the inputs whose latest calibration had a Poor result, then calibrate them")
         self.btn_test = QPushButton("Run live test")
         self.btn_stop = QPushButton("Stop")
-        for b in (self.btn_cal, self.btn_test, self.btn_stop):
+        for b in (self.btn_cal, self.btn_redo, self.btn_test, self.btn_stop):
             b.setFocusPolicy(Qt.NoFocus)
             lv.addWidget(b)
         self.btn_cal.clicked.connect(lambda: self.start_session("calibration"))
         self.btn_test.clicked.connect(lambda: self.start_session("test"))
+        self.btn_redo.clicked.connect(self.redo_poor)
         self.btn_stop.clicked.connect(self.stop_session)
         self.btn_stop.setEnabled(False)
+        if main.tts:
+            main.tts.stateChanged.connect(self.on_tts_state)
+        self.speak = QCheckBox("Speak instructions out loud")
+        self.speak.setChecked(True)
+        self.speak.setFocusPolicy(Qt.NoFocus)
+        self.speak.setEnabled(main.tts is not None)
+        lv.addWidget(self.speak)
         self.auto = QCheckBox("Practice person follows the cues")
         self.auto.setChecked(True)
         self.auto.setFocusPolicy(Qt.NoFocus)
@@ -902,6 +1138,7 @@ class CalibPage(QWidget):
                                    f"Every session is saved as a trial in the {data_dir().name} folder")
         if not self.rec:
             self.show_saved_results()
+        self.update_total()
 
     def deactivate(self):
         for action in list(self.held_keys.values()):
@@ -909,8 +1146,7 @@ class CalibPage(QWidget):
         self.held_keys.clear()
 
     def go_home(self):
-        if self.rec and QMessageBox.question(self, "Stop?", "A session is running. Stop it (nothing is saved)?") \
-                != QMessageBox.Yes:
+        if self.rec and QMessageBox.question(self, "Stop?", "A session is running. Stop it?") != QMessageBox.Yes:
             return
         self.stop_session()
         self.main.go("start")
@@ -921,6 +1157,20 @@ class CalibPage(QWidget):
         self.total.setText(f"Calibration takes about {secs / 60:.1f} min" if inputs else "Pick at least one input")
         self.btn_cal.setEnabled(bool(inputs) and not self.rec)
         self.btn_test.setEnabled(bool(inputs) and not self.rec)
+        self.btn_redo.setEnabled(bool(self.poor_inputs()) and not self.rec)
+
+    def poor_inputs(self):
+        """Inputs whose most recent CALIBRATION had any Poor item."""
+        return sorted({r["input"] for r in self.main.profile.calibration.values()
+                       if r.get("kind") == "calibration" and r.get("verdict") == "Poor" and r.get("input") in C.INPUTS})
+
+    def redo_poor(self):
+        poor = self.poor_inputs()
+        if not poor:
+            return
+        for k, cb in self.checks.items():
+            cb.setChecked(k in poor)
+        self.start_session("calibration")
 
     def selected(self):
         return [k for k, cb in self.checks.items() if cb.isChecked()]
@@ -937,13 +1187,16 @@ class CalibPage(QWidget):
             return
         inputs = self.selected()
         self.kind = kind
-        self.steps = C.build_calibration(inputs) if kind == "calibration" else C.build_test(inputs, reps=3)
+        self.seed = random.randrange(1_000_000)  # saved with the trial, so the order can be reproduced
+        self.steps = (C.build_calibration(inputs, seed=self.seed) if kind == "calibration"
+                      else C.build_test(inputs, reps=3, seed=self.seed))
         self.total_s = C.total_seconds(self.steps)
         self.rec = TrialRecorder(kind, self.main.profile.name, eng.info)
         eng.set_freqs(C.SSVEP_FREQS)
         eng.set_recorder(self.rec)
         self.i, self.cur_t0, self.elapsed_before = -1, None, 0.0
-        for b, on in ((self.btn_cal, False), (self.btn_test, False), (self.btn_stop, True)):
+        self.voice_warning = ""
+        for b, on in ((self.btn_cal, False), (self.btn_redo, False), (self.btn_test, False), (self.btn_stop, True)):
             b.setEnabled(on)
         for cb in self.checks.values():
             cb.setEnabled(False)
@@ -970,9 +1223,34 @@ class CalibPage(QWidget):
             QTimer.singleShot(1500, self.finish)
             return
         st = self.steps[self.i]
-        self.cur_t0 = local_clock()
+        if self.speak.isChecked() and self.main.tts:
+            # read the whole instruction first. The cue (flicker circle / arrow) only appears and
+            # the step's clock only starts once the voice has finished, so no action starts early
+            # or without sound, and the recording is timed from when the wearer heard it.
+            self.canvas.show_listen(st)
+            self.waiting_speech, self.speech_started, self.speech_retried = True, False, False
+            self.speech_deadline = time.monotonic() + 2.5
+            self.main.say(st.text.replace("—", ","))
+            return
         self.canvas.show_step(st)
         self.main.beep()
+        self.begin_step()
+
+    def on_tts_state(self, state):
+        if not getattr(self, "waiting_speech", False):
+            return
+        if state == QTextToSpeech.State.Speaking:
+            self.speech_started = True
+        elif self.speech_started:
+            self.begin_step()
+
+    def begin_step(self):
+        self.waiting_speech = False
+        if not self.rec:
+            return
+        st = self.steps[self.i]
+        self.canvas.show_step(st)  # the cue appears now, together with the clock starting
+        self.cur_t0 = local_clock()
         fake = self.main.fake if self.main.engine.status.get("fake") else None
         if fake and self.auto.isChecked():
             for spec in st.fake:
@@ -983,6 +1261,19 @@ class CalibPage(QWidget):
         self.step_timer.start(int(st.dur * 1000))
 
     def tick(self):
+        if self.rec and getattr(self, "waiting_speech", False) and time.monotonic() > self.speech_deadline:
+            st = self.steps[self.i]
+            if self.speech_started:  # it spoke but never reported finishing: carry on
+                self.begin_step()
+            elif not self.speech_retried:  # no sound yet: try the voice once more
+                self.speech_retried = True
+                self.speech_deadline = time.monotonic() + 2.5
+                self.main.tts.stop()
+                self.main.say(st.text.replace("—", ","))
+            else:  # the voice isn't working: never start silently, beep instead
+                self.main.beep()
+                self.voice_warning = "⚠ Voice not working — using beeps. Check the volume / speaker. · "
+                self.begin_step()
         if not self.rec or self.cur_t0 is None:
             return
         st = self.steps[self.i]
@@ -991,10 +1282,14 @@ class CalibPage(QWidget):
         self.canvas.update()
         self.progress.setValue(int(100 * (self.elapsed_before + in_step) / max(self.total_s, 1)))
         left = self.total_s - self.elapsed_before - in_step
-        self.step_label.setText(f"{'Calibration' if self.kind == 'calibration' else 'Live test'} · step "
+        self.step_label.setText(f"{getattr(self, 'voice_warning', '')}"
+                                f"{'Calibration' if self.kind == 'calibration' else 'Live test'} · step "
                                 f"{self.i + 1} of {len(self.steps)} · about {left / 60:.1f} min left")
 
     def end_ui(self):
+        self.waiting_speech = False
+        if self.main.tts:
+            self.main.tts.stop()
         self.tick_timer.stop()
         self.step_timer.stop()
         self.main.engine.set_recorder(None)
@@ -1008,33 +1303,51 @@ class CalibPage(QWidget):
     def stop_session(self):
         if not self.rec:
             return
+        self.step_timer.stop()
+        self.close_step()
+        done = sum(1 for c in self.rec.cues if c["phase"] == "action")
+        if done and QMessageBox.question(
+                self, "Save what was recorded?",
+                f"{done} action step(s) were recorded. Save them as a partial trial?\n"
+                "(Scores are shown, but a partial calibration does not change the profile's settings.)") \
+                == QMessageBox.Yes:
+            self.finish(partial=True)
+            return
         self.end_ui()
         self.canvas.set_message("Stopped — nothing was saved")
         self.step_label.setText("")
 
-    def finish(self):
+    def finish(self, partial=False):
         rec, kind = self.rec, self.kind
         if not rec:
             return
         self.end_ui()
+        if partial:
+            rec.kind = f"{kind}_partial"
         rows, events, cues = rec.snapshot()
         prof = self.main.profile
         if kind == "calibration":
             results, update = C.analyze_calibration(rows, cues)
-            folder = rec.save(results, {"inputs": self.selected()})
-            prof.record("calibration", results, folder, update)
-            note = "Settings updated for Good and OK inputs; Poor ones kept their old settings."
+            folder = rec.save(results, {"inputs": self.selected(), "seed": self.seed, "randomized": True,
+                                        "partial": partial, "settings_used": dict(prof.settings)})
+            prof.record(rec.kind, results, folder, None if partial else update)
+            note = ("Partial session: scores saved, settings NOT changed." if partial else
+                    "Settings updated for Good and OK inputs; Poor ones kept their old settings.")
             summary = None
         else:
             results, summary = C.score_test(events, cues)
-            folder = rec.save(results, {"inputs": self.selected(), "summary": summary})
-            prof.record("test", results, folder)
+            folder = rec.save(results, {"inputs": self.selected(), "summary": summary, "seed": self.seed,
+                                        "partial": partial, "settings_used": dict(prof.settings)})
+            prof.record(rec.kind, results, folder)
             note = (f"False alarms while resting: {summary['false_alarms']} "
                     f"({summary['false_alarms_per_min']}/min"
                     f"{', from ' + ', '.join(summary['false_alarm_types']) if summary['false_alarm_types'] else ''}).")
         prof.save()
         self.main.apply_profile()
         good = sum(r["verdict"] == "Good" for r in results)
+        ranked = sorted(results, key=lambda r: -r["accuracy"])
+        best = ", ".join(f"{r['item']} {r['accuracy']:.0%}" for r in ranked[:5])
+        note = f"BEST SIGNALS: {best}\n\n{note}"
         self.canvas.set_message(f"{'Calibration' if kind == 'calibration' else 'Live test'} done: "
                                 f"{good} of {len(results)} Good", "See the Results tab")
         self.show_results(results, f"{'Calibration' if kind == 'calibration' else 'Live test'} — just now",
@@ -1043,6 +1356,7 @@ class CalibPage(QWidget):
 
     # ---------- results
     def show_results(self, results, title, note):
+        results = sorted(results, key=lambda r: -r.get("accuracy", 0))  # best first
         self.results_title.setText(title)
         self.table.setRowCount(len(results))
         for i, r in enumerate(results):
@@ -1156,7 +1470,7 @@ class StartPage(QWidget):
         hv.addWidget(self.rb_real)
         sr = QHBoxLayout()
         self.stream_box = QComboBox()
-        self.stream_box.addItem("First EEG stream found", None)
+        self.stream_box.addItem("Best EEG stream found", None)
         sr.addWidget(self.stream_box, 1)
         self.search_btn = QPushButton("Search")
         self.search_btn.clicked.connect(self.search)
@@ -1240,7 +1554,7 @@ class StartPage(QWidget):
         self.search_btn.setEnabled(True)
         self.search_btn.setText("Search")
         self.stream_box.clear()
-        self.stream_box.addItem("First EEG stream found", None)
+        self.stream_box.addItem("Best EEG stream found", None)
         for s in streams:
             if s["name"] == FAKE_NAME:
                 continue
@@ -1260,7 +1574,11 @@ class StartPage(QWidget):
         if m.get("connected"):
             names = "" if m.get("names_from_stream", True) else \
                 " · channel names missing, assuming the standard eego 24 layout"
-            self.conn_detail.setText(f"{m.get('n_channels', '?')} channels at {m.get('rate', 0):g} Hz{names}")
+            missing = (f"<br><span style='color:{WARN}'>Not found: {', '.join(m['missing'])} — the inputs that "
+                       f"need them will work poorly. Check the channel names with ANT staff.</span>"
+                       if m.get("missing") else "")
+            self.conn_detail.setText(f"{m.get('stream_type', 'EEG')} stream · {m.get('n_channels', '?')} channels "
+                                     f"at {m.get('rate', 0):g} Hz{names}{missing}")
 
     def handle_key(self, e):
         return False
@@ -1284,6 +1602,14 @@ class MainWindow(QMainWindow):
         self.bridge.event.connect(self.on_event)
         self.engine = LiveEngine(self.safe_emit, self.profile.settings)
         self.beep_sound = self.make_beep()
+        self.tts = None
+        if QTextToSpeech is not None:
+            try:
+                engine = os.environ.get("HFV_TTS_ENGINE")  # "mock" = silent, for tests
+                self.tts = QTextToSpeech(engine, self) if engine else QTextToSpeech(self)
+                self.tts.setRate(0.0)  # normal speaking pace
+            except Exception:
+                self.tts = None
 
         self.pages = {"start": StartPage(self), "calib": CalibPage(self), "viewer": ViewerPage(self, args.pdf)}
         self.stack = QStackedWidget()
@@ -1364,6 +1690,9 @@ class MainWindow(QMainWindow):
     def beep(self):
         self.beep_sound.play()
 
+    def say(self, text):
+        self.tts.say(text)
+
     # ---------- keyboard
     def eventFilter(self, obj, e):
         if e.type() not in (QEvent.KeyPress, QEvent.KeyRelease):
@@ -1373,6 +1702,11 @@ class MainWindow(QMainWindow):
         return self.pages[self.current].handle_key(e)
 
     def closeEvent(self, e):
+        cal = self.pages["calib"]
+        if cal.rec:  # closing mid-session: keep the data rather than lose it
+            cal.step_timer.stop()
+            cal.close_step()
+            cal.finish(partial=True)
         self.pages[self.current].deactivate()
         self.profile.save()
         self.engine.stop()

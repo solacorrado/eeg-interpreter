@@ -75,6 +75,10 @@ uv run python bci_demo/desktop_app.py --fake     # start with the practice (fake
   For every input the app finds the threshold that best separates "doing it" from
   "resting" and grades it **Good** (≥90%), **OK** (≥75%) or **Poor**. Good and OK
   inputs update the profile; Poor ones keep their old settings.
+- **Randomized:** each calibration shuffles the order of the input blocks and of the trials
+  inside each block, and varies every rest by -20% to +30%, so the wearer can't anticipate
+  cues and slow drift can't line up with one class. The shuffle seed is saved with the trial.
+- **Redo Poor inputs only:** recalibrates just the inputs whose last calibration had a Poor result.
 - **Run live test:** random cues; the live detectors (using the profile) must fire the
   right event in time. Reports hit rate, reaction time and false alarms per minute.
 - **Live signals:** a bar for every signal with the profile's threshold marked, and a
@@ -84,6 +88,43 @@ uv run python bci_demo/desktop_app.py --fake     # start with the practice (fake
   J jaw, E eyebrows, B blink, ← → glance, C eyes closed, R / L fist, 1–4 stare at 12–15 Hz.
 
 **Viewer:** the PDF / audio / video controls below, using the profile's settings.
+
+**Plugging in the real headset.** The app reads whatever ANT's eego software streams over
+LSL on their network. It copes with streams whose type isn't exactly "EEG", any sample
+rate, volts or microvolts (every signal is measured against the wearer's own resting
+level), labels like `Fp1-CPz` or `EEG O1`, and extra trigger/counter channels. If a
+channel it needs can't be found, the start screen says which one. Needs: LSL streaming
+turned on in eego, your laptop on ANT's network, and Python allowed through the Windows firewall.
+
+**If something goes wrong mid-session:** the status line turns red ("NO DATA for N s") if
+the headset stops sending (LSL reconnects by itself). **Stop** offers to save what was
+recorded as a *partial* trial (scored, but it doesn't change the profile's settings), and
+closing the window mid-session saves it automatically.
+
+### Before you go to the station: self-test
+
+```bash
+uv run python bci_demo/selftest.py
+```
+
+About 2 minutes, no headset. It checks the libraries, the sample files and the data folder,
+then runs a short calibration and live test on the practice headset. Ends with PASS or FAIL.
+
+### After a session: re-analyse the recordings
+
+Every trial keeps the raw EEG, so detection can be improved without the headset. Change the
+code, then re-score real recordings with it:
+
+```bash
+uv run python bci_demo/reanalyze.py                       # list saved trials
+uv run python bci_demo/reanalyze.py latest                # re-score the newest one
+uv run python bci_demo/reanalyze.py all --profile Sola    # every trial for one wearer
+uv run python bci_demo/reanalyze.py latest --csv          # also export eeg.csv (time + channels)
+```
+
+It prints the old score next to the new one for every input. The live app and this tool
+share the same processing code and cut the data into identical 40 ms steps, so a re-run of
+unchanged code reproduces the original scores exactly.
 
 ### What gets saved, and where
 
@@ -112,6 +153,26 @@ uv run python bci_demo/server.py
 ```
 
 Options: `--pdf FILE`, `--ssvep-threshold 0.42`, `--clench-factor 5`, `--port 8780`.
+
+## Files
+
+```
+bci_demo/
+  desktop_app.py  the desktop app: start screen, calibrate & test, viewer (PySide6 / Qt)
+  live_engine.py  reads the LSL stream; the shared Pipeline (features -> events) used live and offline
+  features.py     raw EEG -> jaw / brow / blink / glance / alpha / hand-rhythm features, SSVEP scores
+  gestures.py     features -> events, using a profile's thresholds
+  calibration.py  calibration and live-test steps (randomized) and scoring
+  storage.py      profiles and trial recordings on disk
+  reanalyze.py    re-score saved trials with the current code; export EEG to CSV
+  selftest.py     2-minute readiness check on the practice headset
+  version.py      app version, stored with every result
+  fake_eeg.py     practice headset: a fake 24-channel eego stream that can do every input
+  make_media.py   generates the sample PDF, audio and video
+  icon.ico        app icon
+  server.py, engine.py, detect.py, static/index.html
+                  the simpler web version (flicker + jaw)
+```
 
 ## Status
 

@@ -14,10 +14,11 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-SSVEP_FREQS = [12.0, 13.0, 14.0, 15.0]
+# Flicker sweep: no rate is a multiple of another (e.g. 7.5 would echo at 15), so each is judged fairly.
+SSVEP_FREQS = [8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 17.0, 19.0]
 
 INPUTS = {  # key: (label, approx. calibration seconds)
-    "ssvep": ("Look at flicker (12–15 Hz)", 85),
+    "ssvep": ("Flicker sweep 8–19 Hz (10 rates)", 185),
     "jaw": ("Jaw clench", 30),
     "brow": ("Eyebrow raise", 30),
     "blink": ("Blink", 36),
@@ -44,42 +45,67 @@ def _rest(inp, text, dur):
     return Step(inp, "rest", "rest", text, dur)
 
 
-def build_calibration(inputs):
-    steps = [Step("all", "settle", "", "Relax, sit still and look at the dot", 5)]
+def _trials(inp):
+    """(rest, action) pairs for one input, in a fixed order (build_calibration shuffles them)."""
+    pairs = []
+    if inp == "ssvep":
+        for f in SSVEP_FREQS * 2:
+            pairs.append((_rest(inp, "Relax — look at the dot", 3),
+                          Step(inp, "action", f"{f:g}", "Stare at the glowing circle", 6,
+                               [("look", 5.6, 0.3, f)], flicker=f)))
+    elif inp == "jaw":
+        pairs = [(_rest(inp, "Relax your jaw", 3),
+                  Step(inp, "action", "once", "Clench your jaw once, quickly", 2, [("clench", 0.5, 0.4)]))
+                 for _ in range(6)]
+    elif inp == "brow":
+        pairs = [(_rest(inp, "Relax your face", 3),
+                  Step(inp, "action", "once", "Raise your eyebrows once", 2, [("brow", 0.6, 0.4)]))
+                 for _ in range(6)]
+    elif inp == "blink":
+        pairs = [(_rest(inp, "Look at the dot (blink normally)", 3),
+                  Step(inp, "action", "once", "Blink once, firmly", 1.5, [("blink", 0.25, 0.4)]))
+                 for _ in range(8)]
+    elif inp == "glance":
+        pairs = [(_rest(inp, "Look at the dot", 3),
+                  Step(inp, "action", side, f"Look at the {side.upper()} arrow, then back to the dot", 2,
+                       [(f"glance_{side}", 0.8, 0.35)], arrow=side))
+                 for side in ["left", "right"] * 4]
+    elif inp == "eyes_closed":
+        pairs = [(_rest(inp, "Eyes open — look at the dot", 5),
+                  Step(inp, "action", "closed", "Close your eyes. Open them at the beep.", 5,
+                       [("eyes_closed", 4.3, 0.5)]))
+                 for _ in range(4)]
+    elif inp == "fist":
+        pairs = [(_rest(inp, "Relax both hands", 4),
+                  Step(inp, "action", side, f"Squeeze your {side.upper()} fist (keep squeezing)", 4,
+                       [(f"fist_{side}", 3.4, 0.4)]))
+                 for side in ["right", "left"] * 4]
+    return pairs
+
+
+def build_calibration(inputs, seed=None, randomize=True):
+    """Calibration steps. With randomize (the default), the order of the input blocks and of
+    the trials inside each block is shuffled, and every rest gets a random length (-20% to
+    +30%), so the wearer can't anticipate cues and slow drift can't line up with one class.
+    Each input stays in its own block so the instructions don't change every few seconds.
+    The same seed always gives the same order (it is saved with the trial)."""
+    rng = random.Random(seed)
+    blocks = []
     for inp in inputs:
-        if inp == "ssvep":
-            for _ in range(2):
-                for f in SSVEP_FREQS:
-                    steps.append(_rest(inp, "Relax — look at the dot", 4))
-                    steps.append(Step(inp, "action", f"{f:g}", "Stare at the glowing circle", 6,
-                                      [("look", 5.6, 0.3, f)], flicker=f))
-        elif inp == "jaw":
-            for _ in range(6):
-                steps += [_rest(inp, "Relax your jaw", 3),
-                          Step(inp, "action", "once", "Clench your jaw once, quickly", 2, [("clench", 0.5, 0.4)])]
-        elif inp == "brow":
-            for _ in range(6):
-                steps += [_rest(inp, "Relax your face", 3),
-                          Step(inp, "action", "once", "Raise your eyebrows once", 2, [("brow", 0.6, 0.4)])]
-        elif inp == "blink":
-            for _ in range(8):
-                steps += [_rest(inp, "Look at the dot (blink normally)", 3),
-                          Step(inp, "action", "once", "Blink once, firmly", 1.5, [("blink", 0.25, 0.4)])]
-        elif inp == "glance":
-            for side in ["left", "right"] * 4:
-                steps += [_rest(inp, "Look at the dot", 3),
-                          Step(inp, "action", side, f"Look at the {side.upper()} arrow, then back to the dot", 2,
-                               [(f"glance_{side}", 0.8, 0.35)], arrow=side)]
-        elif inp == "eyes_closed":
-            for _ in range(4):
-                steps += [_rest(inp, "Eyes open — look at the dot", 5),
-                          Step(inp, "action", "closed", "Close your eyes. Open them at the beep.", 5,
-                               [("eyes_closed", 4.3, 0.5)])]
-        elif inp == "fist":
-            for side in ["right", "left"] * 4:
-                steps += [_rest(inp, "Relax both hands", 4),
-                          Step(inp, "action", side, f"Squeeze your {side.upper()} fist (keep squeezing)", 4,
-                               [(f"fist_{side}", 3.4, 0.4)])]
+        pairs = _trials(inp)
+        if randomize:
+            rng.shuffle(pairs)
+            for rest, _ in pairs:
+                rest.dur = round(rest.dur * rng.uniform(0.8, 1.3), 1)
+        blocks.append(pairs)
+    if randomize:
+        rng.shuffle(blocks)
+    # 20 s at the start: on a real headset the first ~1.5 min can be very noisy while the gel and
+    # the wearer settle (seen in the first real session), so nothing is scored during that time.
+    steps = [Step("all", "settle", "", "Sit still and relax while the signal settles. Look at the dot.", 20)]
+    for pairs in blocks:
+        for rest, action in pairs:
+            steps += [rest, action]
     return steps
 
 
@@ -112,8 +138,9 @@ def build_test(inputs, reps=3, seed=None):
     rng = random.Random(seed)
     cues = []
     for inp in inputs:
+        n = 1 if inp == "ssvep" else reps  # 10 flicker rates: once each keeps the test short
         for cls, text, dur, fake, expect, extra in TEST_ITEMS[inp]:
-            cues += [Step(inp, "action", cls, text, dur, fake, expect=expect, **extra) for _ in range(reps)]
+            cues += [Step(inp, "action", cls, text, dur, fake, expect=expect, **extra) for _ in range(n)]
     rng.shuffle(cues)
     steps = [Step("all", "settle", "", "Relax, sit still and look at the dot", 4)]
     for c in cues:
@@ -295,13 +322,16 @@ def analyze_calibration(rows, cues):
                     hits += int(np.sum(best == SSVEP_FREQS.index(f)))
                     tot += int(m.sum())
             top = hits / tot if tot else 0.0
-            if sep:
-                sep["acc"] = (sep["acc"] + top) / 2
+            # graded on: does THIS rate's signal clearly rise when stared at? (the head-to-head
+            # "top match" is shown too, but a strong 10 Hz alpha rhythm can win it unfairly)
             s = {"ssvep_thr": {cls: round(_clamp(sep["thr"], 0.2, 0.9), 3)}} if sep else {}
-            results.append(_result(f"ssvep_{cls}", "ssvep", f"Flicker {cls} Hz", sep,
-                                   s.get("ssvep_thr", {}).get(cls),
-                                   f"match {sep['act']:.2f} vs others {sep['rest']:.2f}; top match {top:.0%} of the time"
-                                   if sep else "no data", s))
+            res = _result(f"ssvep_{cls}", "ssvep", f"Flicker {cls} Hz", sep, s.get("ssvep_thr", {}).get(cls),
+                          (f"stare {sep['act']:.2f} vs not {sep['rest']:.2f}; top of all rates {top:.0%}"
+                           + ("; HIGH WHEN NOT STARING (alpha?) - may fire falsely" if sep["rest"] > 0.4 else ""))
+                          if sep else "no data", s)
+            if sep and sep["rest"] > 0.4 and res["verdict"] == "Good":
+                res["verdict"] = "OK"
+            results.append(res)
 
     update = {}
     for r in results:
