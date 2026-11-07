@@ -21,8 +21,11 @@ NAME = "FakeEego"
 
 class FakeHeadset:
     def __init__(self):
-        self.gaze = None          # flicker frequency being "looked at"
-        self.clench_until = 0.0
+        # What the fake person is doing, stamped with real times. Each sample is generated
+        # from these stamps, so the signal stays correct even if this thread runs late
+        # (e.g. while a busy window keeps Python occupied) and has to catch up.
+        self.gaze_changes = [(0.0, None)]   # (time, flicker frequency or None)
+        self.clench_spans = []              # [start, end] (end = inf while held)
         self.lock = threading.Lock()
         info = StreamInfo(NAME, "EEG", len(CHANNELS), RATE, "float32", "fake-eego-bci-demo")
         chans = info.desc().append_child("channels")
@@ -35,17 +38,18 @@ class FakeHeadset:
 
     def look(self, freq):
         with self.lock:
-            self.gaze = float(freq) if freq else None
+            self.gaze_changes.append((time.time(), float(freq) if freq else None))
 
     def clench(self, how=True):
         """True = a quick 0.5 s clench, "on" = start clenching until "off"."""
+        now = time.time()
         with self.lock:
-            if how == "on":
-                self.clench_until = float("inf")
-            elif how == "off":
-                self.clench_until = time.time()
+            if how == "off":
+                for span in self.clench_spans:
+                    if span[1] == float("inf"):
+                        span[1] = now
             else:
-                self.clench_until = time.time() + 0.5
+                self.clench_spans.append([now, float("inf") if how == "on" else now + 0.5])
 
     def start(self):
         threading.Thread(target=self._run, daemon=True).start()
@@ -55,19 +59,33 @@ class FakeHeadset:
         chunk = 20
         n = 0
         start = local_clock()
+        wall0 = time.time()
         alpha_amp = 4.0
         while True:
             t = (n + np.arange(chunk)) / RATE
+            wall = wall0 + t                      # real time of each sample
             data = rng.normal(0, 6, (chunk, len(CHANNELS)))
             alpha_amp = float(np.clip(alpha_amp + rng.normal(0, 0.2), 1, 8))
             data[:, self.occ] += (alpha_amp * np.sin(2 * np.pi * 10.2 * t))[:, None]
             with self.lock:
-                gaze, clenching = self.gaze, time.time() < self.clench_until
-            if gaze:
-                ss = 2.5 * np.sin(2 * np.pi * gaze * t) + 1.2 * np.sin(2 * np.pi * 2 * gaze * t + 0.7)
-                data[:, self.occ] += ss[:, None]
-            if clenching:
-                data[:, self.tmp] += sosfilt(self.emg_sos, rng.normal(0, 120, (chunk, len(self.tmp))), axis=0)
+                old = [g for g in self.gaze_changes if g[0] <= wall[0]]
+                self.gaze_changes = old[-1:] + [g for g in self.gaze_changes if g[0] > wall[0]]
+                self.clench_spans = [s for s in self.clench_spans if s[1] > wall[0] - 10]
+                gaze_changes, spans = list(self.gaze_changes), [tuple(s) for s in self.clench_spans]
+            gaze = np.full(chunk, np.nan)         # frequency being looked at, per sample
+            for g_t, freq in sorted(gaze_changes):
+                gaze[wall >= g_t] = np.nan if freq is None else freq
+            looking = ~np.isnan(gaze)
+            if looking.any():
+                f = np.where(looking, gaze, 0.0)
+                ss = 2.5 * np.sin(2 * np.pi * f * t) + 1.2 * np.sin(2 * np.pi * 2 * f * t + 0.7)
+                data[:, self.occ] += (ss * looking)[:, None]
+            clenching = np.zeros(chunk, bool)
+            for a, b in spans:
+                clenching |= (wall >= a) & (wall < b)
+            if clenching.any():
+                emg = sosfilt(self.emg_sos, rng.normal(0, 120, (chunk, len(self.tmp))), axis=0)
+                data[:, self.tmp] += emg * clenching[:, None]
             self.outlet.push_chunk(data.astype(np.float32).tolist())
             n += chunk
             delay = start + n / RATE - local_clock()

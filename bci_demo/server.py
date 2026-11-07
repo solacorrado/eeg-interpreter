@@ -13,16 +13,13 @@ import argparse
 import json
 import queue
 import threading
-import time
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
 from pathlib import Path
 
-import numpy as np
 import pypdfium2 as pdfium
-from pylsl import StreamInlet, resolve_byprop
 
-from detect import ClenchDetector, SSVEPDetector
+from engine import EEGEngine
 
 HERE = Path(__file__).parent
 STATIC = HERE / "static"
@@ -55,79 +52,6 @@ class Broadcaster:
 
 
 bus = Broadcaster()
-
-
-# ---------- EEG loop ----------
-class EEGWorker:
-    def __init__(self, args):
-        self.args = args
-        self.freqs = []
-        self.ssvep = None
-        self.clench = None
-        self.status = {"connected": False, "stream": None, "fake": args.fake}
-
-    def set_freqs(self, freqs):
-        self.freqs = freqs
-        if self.ssvep:
-            self.ssvep.set_freqs(freqs)
-
-    def start(self):
-        threading.Thread(target=self._run, daemon=True).start()
-
-    def _connect(self):
-        while True:
-            name = self.args.stream
-            found = resolve_byprop("name", name, timeout=3) if name else resolve_byprop("type", "EEG", timeout=3)
-            if found:
-                return StreamInlet(found[0], max_buflen=10)
-            self.status.update(connected=False, stream=None)
-            bus.send({"type": "status", **self.status, "msg": "Looking for EEG stream..."})
-
-    def _run(self):
-        inlet = self._connect()
-        info = inlet.info()
-        rate = info.nominal_srate()
-        names = []
-        ch = info.desc().child("channels").child("channel")
-        for _ in range(info.channel_count()):
-            names.append(ch.child_value("label"))
-            ch = ch.next_sibling()
-        print(f"Connected to {info.name()!r}: {info.channel_count()} ch @ {rate} Hz")
-        print("Channels:", ", ".join(names) or "(no names)")
-        self.status.update(connected=True, stream=info.name(), rate=rate)
-
-        self.ssvep = SSVEPDetector(rate, names, threshold=self.args.ssvep_threshold)
-        self.ssvep.set_freqs(self.freqs)
-        self.clench = ClenchDetector(rate, names, factor=self.args.clench_factor)
-        buf = np.zeros((0, info.channel_count()))
-        keep = int(rate * 4)
-        last_ssvep = last_status = 0.0
-
-        while True:
-            chunk, _ = inlet.pull_chunk(timeout=0.1)
-            if chunk:
-                arr = np.asarray(chunk, dtype=float)
-                buf = np.vstack([buf, arr])[-keep:]
-                self.clench.feed(arr)
-            now = time.time()
-            ev = self.clench.step()
-            if ev:
-                print("JAW", ev)
-                bus.send({"type": {"start": "clench_start", "hold": "hold", "clench": "clench", "end": "clench_end"}[ev]})
-            if self.clench.active or ev == "clench" or ev == "end":
-                self.ssvep.block(1.0)  # clench muscle noise would confuse SSVEP
-            if now - last_ssvep >= 0.25:
-                last_ssvep = now
-                f = self.ssvep.step(buf)
-                if f:
-                    print(f"SSVEP {f} Hz")
-                    bus.send({"type": "ssvep", "freq": f})
-            if now - last_status >= 0.5:
-                last_status = now
-                bus.send({"type": "status", **self.status,
-                          "calibrating": self.clench.calibrating,
-                          "scores": {str(k): round(v, 2) for k, v in self.ssvep.scores.items()},
-                          "emg": round(self.clench.ratio, 1)})
 
 
 # ---------- PDF pages as images ----------
@@ -277,7 +201,8 @@ def main():
 
     if not Path(args.pdf).exists():
         raise SystemExit(f"No PDF at {args.pdf}. Run: uv run python bci_demo/make_media.py  (or pass --pdf FILE)")
-    worker = EEGWorker(args)
+    worker = EEGEngine(bus.send, stream=args.stream, fake=args.fake,
+                       ssvep_threshold=args.ssvep_threshold, clench_factor=args.clench_factor)
     worker.start()
     pdf = PDF(args.pdf)
     server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(worker, pdf, fake))

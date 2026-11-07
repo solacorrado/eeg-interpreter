@@ -49,17 +49,28 @@ uv run python bci_demo/make_media.py      # make the sample PDF, audio and video
 
 ## Run
 
+There are two versions with the same controls. Pick either one.
+
+**Desktop app** (a normal window, no browser):
+
 ```bash
 # No headset: a fake one, driven by the keyboard
-uv run python bci_demo/server.py --fake
+uv run python bci_demo/desktop_app.py --fake
 
 # Real eego: connect to ANT's network first
-uv run python bci_demo/server.py                    # first LSL stream of type EEG
-uv run python bci_demo/server.py --stream "NAME"    # or pick a stream by name
+uv run python bci_demo/desktop_app.py                    # first LSL stream of type EEG
+uv run python bci_demo/desktop_app.py --stream "NAME"    # or pick a stream by name
 ```
 
-Open **http://localhost:8780**, read the flashing warning, and press **Start**. Sit still
-and relax your jaw for the first 3 seconds while it calibrates.
+**Web app** (runs in a browser at http://localhost:8780):
+
+```bash
+uv run python bci_demo/server.py --fake
+uv run python bci_demo/server.py
+```
+
+Read the flashing warning and press **OK** (desktop) or **Start** (web). Sit still and
+relax your jaw for the first 3 seconds while it calibrates.
 
 In `--fake` mode, hold **Shift** with an arrow key or `J` to send *fake brain signals*
 through the real detectors (an arrow then takes about a second, like a real look).
@@ -71,7 +82,7 @@ Options:
 | `--pdf FILE` | `bci_demo/media/sample.pdf` | the PDF to show |
 | `--ssvep-threshold` | `0.42` | how strong a look must be. Raise it if arrows fire on their own; lower it if they never fire |
 | `--clench-factor` | `5` | how many times above resting the jaw signal must jump. Raise it if clenches fire too easily |
-| `--port` | `8780` | web page port |
+| `--port` | `8780` | web page port (web app only) |
 
 The top bar shows live numbers to tune with: each arrow's match score (a look
 needs about 0.42+) and the jaw level (× resting; turns yellow during a clench).
@@ -80,11 +91,13 @@ needs about 0.42+) and the jaw level (× resting; turns yellow during a clench).
 
 ```
 bci_demo/
-  server.py       LSL reader + web server; sends events to the page
+  desktop_app.py  the desktop version (PySide6 / Qt window)
+  server.py       the web version's server; sends events to the page
+  engine.py       reads the LSL stream and runs the detectors (shared by both versions)
   detect.py       SSVEP (CCA) and jaw-clench detectors
   fake_eeg.py     simulated 24-channel eego stream for testing without hardware
   make_media.py   generates the sample PDF, audio and video
-  static/index.html  the app (PDF / Audio / Video tabs, flicker, keyboard)
+  static/index.html  the web version's page (PDF / Audio / Video tabs, flicker, keyboard)
 ```
 
 ## Status

@@ -105,26 +105,36 @@ class ClenchDetector:
         self.history = deque(maxlen=int(30 / 0.1))  # ~30 s of normal power levels
         self.factor = factor
         self.hold_s = hold_s
-        self.calib_until = time.time() + calib_s
-        self.ratio = 0.0
+        self.calib_s = calib_s
+        self.step_n = max(1, int(0.04 * rate))  # check every 40 ms of data
+        self.n = 0                               # samples seen; time is counted in samples,
+        self.ratio = 0.0                         # so late-arriving batches are timed correctly
         self.above = self.below = 0
         self.active = self.held = False
-        self.start_t = self.last_end = 0.0
+        self.start_t = self.last_end = -10.0
 
     @property
     def calibrating(self):
-        return time.time() < self.calib_until
+        return self.n / self.rate < self.calib_s
 
-    def feed(self, chunk):
-        y, self.zi = sosfilt(self.sos, chunk[:, self.ch], axis=0, zi=self.zi)
-        self.win.extend((y ** 2).mean(axis=1))
+    def process(self, chunk):
+        """Feed new samples (samples x all channels). Returns the list of events they contain."""
+        events = []
+        for i in range(0, len(chunk), self.step_n):
+            part = chunk[i:i + self.step_n]
+            y, self.zi = sosfilt(self.sos, part[:, self.ch], axis=0, zi=self.zi)
+            self.win.extend((y ** 2).mean(axis=1))
+            self.n += len(part)
+            ev = self._step()
+            if ev:
+                events.append(ev)
+        return events
 
-    def step(self):
-        """Call after each new chunk of data. Returns an event name (see class doc) or None."""
+    def _step(self):
         if len(self.win) < self.win.maxlen:
             return None
         p = float(np.mean(self.win))
-        now = time.time()
+        now = self.n / self.rate
         base = float(np.median(self.history)) if self.history else p
         self.ratio = p / base if base > 0 else 0.0
         if self.calibrating:
