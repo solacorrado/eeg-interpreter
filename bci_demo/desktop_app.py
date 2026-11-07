@@ -50,44 +50,76 @@ from storage import Profile, TrialRecorder, data_dir, list_profiles, load_state,
 from version import APP_VERSION
 
 HERE = Path(__file__).parent
-BG, PANEL, LINE, TEXT, MUTED = "#0d0f12", "#171a20", "#2a2f38", "#e8eaed", "#8b93a1"
-ACCENT, WARN, BAD, ARROW = "#4cc38a", "#f2b84b", "#e5534b", "#ff3b30"
+BG, PANEL, PANEL2, LINE, TEXT, MUTED = "#0b0f16", "#121923", "#18212d", "#243041", "#eef2f8", "#8a97ab"
+ACCENT, WARN, BAD, ARROW = "#34d399", "#fbbf24", "#f87171", "#ff5a52"
+ACCENT_SOFT = "#123327"
+FONT, FONT_DISPLAY = "Segoe UI Variable Text", "Segoe UI Variable Display"
 VERDICT_COLOR = {"Good": ACCENT, "OK": WARN, "Poor": BAD}
 GLOW_STOPS = [(0.0, 1.0), (0.25, 0.82), (0.5, 0.46), (0.75, 0.17), (1.0, 0.0)]  # Gaussian falloff
+MINT_GRADIENT = "qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #3ee6a3, stop:1 #22c3b5)"
 
 STYLE = f"""
-QWidget {{ background:{BG}; color:{TEXT}; font: 10pt 'Segoe UI'; }}
+QWidget {{ background:{BG}; color:{TEXT}; font-family:"{FONT}", "Segoe UI"; font-size:10.5pt; }}
+QToolTip {{ background:{PANEL2}; color:{TEXT}; border:1px solid {LINE}; padding:6px 8px; }}
 #bar {{ background:{PANEL}; border-bottom:1px solid {LINE}; }}
 #bar QLabel, #bar QSlider {{ background:transparent; }}
-#panel {{ background:{PANEL}; border:1px solid {LINE}; border-radius:10px; }}
+#panel {{ background:{PANEL}; border:1px solid {LINE}; border-radius:16px; }}
 #panel QLabel, #panel QCheckBox, #panel QRadioButton {{ background:transparent; }}
-QPushButton {{ background:transparent; border:1px solid {LINE}; color:{TEXT}; padding:6px 14px; border-radius:6px; }}
-QPushButton:hover {{ border-color:{MUTED}; }}
-QPushButton:checked {{ border-color:{ACCENT}; }}
-QPushButton:disabled {{ color:#555b66; border-color:#22262d; }}
-QPushButton#primary {{ background:{ACCENT}; color:#08110c; border:none; font-weight:600; }}
-QPushButton#primary:disabled {{ background:#2a3a31; color:#5d6d63; }}
-QPushButton#big {{ font-size:15pt; padding:22px; border-radius:12px; text-align:left; }}
-QComboBox {{ background:{BG}; border:1px solid {LINE}; border-radius:5px; padding:3px 6px; }}
-QSlider::groove:horizontal {{ height:4px; background:{LINE}; border-radius:2px; }}
-QSlider::handle:horizontal {{ background:{ACCENT}; width:14px; margin:-5px 0; border-radius:7px; }}
-QProgressBar {{ background:{LINE}; border:none; border-radius:3px; height:6px; text-align:center; }}
-QProgressBar::chunk {{ background:{ACCENT}; border-radius:3px; }}
-QTabWidget::pane {{ border:1px solid {LINE}; border-radius:6px; }}
-QTabBar::tab {{ background:{PANEL}; color:{MUTED}; padding:6px 14px; border:1px solid {LINE}; }}
+QPushButton {{ background:{PANEL2}; border:1px solid {LINE}; color:{TEXT}; padding:8px 16px; border-radius:10px; }}
+QPushButton:hover {{ background:#1f2a39; border-color:#34445c; }}
+QPushButton:pressed {{ background:#0f151e; }}
+QPushButton:checked {{ background:{ACCENT_SOFT}; border-color:{ACCENT}; color:#d6fbe8; }}
+QPushButton:disabled {{ color:#4d5767; background:#10161f; border-color:#1b2330; }}
+QPushButton#primary {{ background:{MINT_GRADIENT}; color:#06140f; border:none; font-weight:700; padding:10px 18px; }}
+QPushButton#primary:hover {{ background:qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #5af0b4, stop:1 #38d4c6); }}
+QPushButton#primary:pressed {{ background:#24b88a; }}
+QPushButton#primary:disabled {{ background:#18291f; color:#4f6b60; }}
+QComboBox {{ background:{PANEL2}; border:1px solid {LINE}; border-radius:10px; padding:7px 12px; }}
+QComboBox:hover {{ border-color:#34445c; }}
+QComboBox::drop-down {{ border:none; width:26px; }}
+QComboBox QAbstractItemView {{ background:{PANEL2}; border:1px solid {LINE}; selection-background-color:{ACCENT_SOFT};
+                               selection-color:{TEXT}; outline:none; padding:4px; }}
+QSlider::groove:horizontal {{ height:6px; background:{PANEL2}; border-radius:3px; }}
+QSlider::sub-page:horizontal {{ background:{MINT_GRADIENT}; border-radius:3px; }}
+QSlider::handle:horizontal {{ background:#eafff5; border:2px solid {ACCENT}; width:14px; margin:-6px 0; border-radius:9px; }}
+QProgressBar {{ background:{PANEL2}; border:none; border-radius:4px; max-height:8px; text-align:center; }}
+QProgressBar::chunk {{ background:{MINT_GRADIENT}; border-radius:4px; }}
+QTabWidget::pane {{ border:1px solid {LINE}; border-radius:14px; background:{PANEL}; top:-1px; }}
+QTabBar::tab {{ background:transparent; color:{MUTED}; padding:9px 18px; margin-right:4px; border:none;
+                border-bottom:2px solid transparent; font-weight:600; }}
 QTabBar::tab:selected {{ color:{TEXT}; border-bottom:2px solid {ACCENT}; }}
-QTableWidget {{ background:{PANEL}; gridline-color:{LINE}; border:none; }}
-QHeaderView::section {{ background:{BG}; color:{MUTED}; border:none; padding:4px; }}
-QCheckBox::indicator, QRadioButton::indicator {{ width:14px; height:14px; border:1px solid {MUTED}; background:{BG}; }}
-QCheckBox::indicator {{ border-radius:3px; }}
-QRadioButton::indicator {{ border-radius:8px; }}
+QTabBar::tab:hover {{ color:{TEXT}; }}
+QTableWidget {{ background:{PANEL}; alternate-background-color:{PANEL2}; gridline-color:transparent; border:none; }}
+QHeaderView::section {{ background:{PANEL}; color:{MUTED}; border:none; border-bottom:1px solid {LINE}; padding:6px;
+                        font-weight:600; }}
+QScrollBar:vertical {{ background:transparent; width:10px; margin:2px; }}
+QScrollBar::handle:vertical {{ background:#2b3748; border-radius:4px; min-height:30px; }}
+QScrollBar::add-line, QScrollBar::sub-line {{ height:0; width:0; }}
+QCheckBox {{ spacing:10px; }}
+QRadioButton {{ spacing:10px; }}
+QCheckBox::indicator, QRadioButton::indicator {{ width:16px; height:16px; border:1.5px solid #4a5870; background:{BG}; }}
+QCheckBox::indicator {{ border-radius:5px; }}
+QRadioButton::indicator {{ border-radius:9px; }}
 QCheckBox::indicator:checked, QRadioButton::indicator:checked {{ background:{ACCENT}; border-color:{ACCENT}; }}
+QCheckBox::indicator:hover, QRadioButton::indicator:hover {{ border-color:{ACCENT}; }}
 QCheckBox::indicator:disabled {{ border-color:{LINE}; }}
-#toast {{ background:{PANEL}; border:1px solid {ACCENT}; border-radius:8px; padding:8px 18px; font-size:12pt; }}
-#big_icon {{ font-size:90pt; }}
-#hint {{ color:{MUTED}; }}
-#h1 {{ font-size:22pt; font-weight:700; background:transparent; }}
-#h2 {{ font-size:12pt; font-weight:600; background:transparent; }}
+#toast {{ background:rgba(18, 25, 35, 240); border:1px solid {ACCENT}; border-radius:14px; padding:10px 22px;
+          font-size:13pt; color:{TEXT}; }}
+#big_icon {{ font-size:54pt; color:{ACCENT}; background:{ACCENT_SOFT}; border:2px solid {ACCENT};
+             border-radius:90px; min-width:180px; max-width:180px; min-height:180px; max-height:180px; }}
+#hint {{ color:{MUTED}; background:transparent; }}
+#h1 {{ font-family:"{FONT_DISPLAY}", "Segoe UI"; font-size:26pt; font-weight:700; background:transparent; }}
+#h2 {{ font-family:"{FONT_DISPLAY}", "Segoe UI"; font-size:13pt; font-weight:600; background:transparent; }}
+#panel #badge, #badge {{ background:{ACCENT_SOFT}; color:{ACCENT}; border-radius:14px; font-weight:700; font-size:11pt;
+          min-width:28px; max-width:28px; min-height:28px; max-height:28px; }}
+#bar #pill, #pill {{ background:{PANEL2}; border:1px solid {LINE}; border-radius:14px; padding:5px 14px; }}
+#card {{ background:{PANEL}; border:1px solid {LINE}; border-radius:20px; }}
+#card:hover {{ border:1px solid {ACCENT}; background:#14202c; }}
+#card QLabel {{ background:transparent; }}
+#cardtitle {{ font-family:"{FONT_DISPLAY}", "Segoe UI"; font-size:17pt; font-weight:700; }}
+#cardicon {{ font-size:30pt; }}
+#carddesc {{ color:{MUTED}; font-size:11pt; }}
+#cardarrow {{ color:{ACCENT}; font-size:20pt; font-weight:700; }}
 """
 
 
@@ -110,7 +142,12 @@ def paint_glow(p, center, radius, level):
     p.drawEllipse(center, radius, radius)
 
 
-def status_html(m):
+def short_stream(name):
+    """'EE511-010009-200205_on_DESKTOP-UAPOU9S' -> 'EE511-010009-200205'."""
+    return (name or "").split("_on_")[0]
+
+
+def status_html(m, compact=False):
     if not m or not m.get("connected"):
         msg = (m or {}).get("msg", "Not connected")
         return f"<span style='color:{BAD}'>●</span> {msg}"
@@ -119,10 +156,16 @@ def status_html(m):
                 "check the Wi-Fi / that eego is still streaming (it reconnects by itself)")
     f = m.get("features", {})
     calib = " · <b>calibrating, stay still</b>" if m.get("calibrating") else ""
+    if compact:
+        jaw = f.get("jaw")
+        jaw_txt = (f" &nbsp;·&nbsp; jaw <b style='color:{WARN if m.get('clenching') else TEXT}'>{jaw:.1f}×</b>"
+                   if jaw is not None else "")
+        return (f"<span style='color:{ACCENT}'>●</span>&nbsp; {short_stream(m['stream'])}"
+                f"{' · practice' if m.get('fake') else ''}{calib}{jaw_txt}")
     jaw = f.get("jaw")
     jaw_txt = f"   jaw <b style='color:{WARN if m.get('clenching') else TEXT}'>{jaw:.1f}×</b>" if jaw is not None else ""
     scores = "  ".join(f"{k} Hz {v:.2f}" for k, v in m.get("scores", {}).items())
-    return (f"<span style='color:{ACCENT}'>●</span> {m['stream']}{' (practice)' if m.get('fake') else ''}{calib}"
+    return (f"<span style='color:{ACCENT}'>●</span> {short_stream(m['stream'])}{' (practice)' if m.get('fake') else ''}{calib}"
             f"   <span style='color:{MUTED}'>{scores}</span>{jaw_txt}")
 
 
@@ -164,30 +207,37 @@ class FlickerTarget(QWidget):
     def paintEvent(self, e):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        r = QRectF(self.rect()).adjusted(2, 2, -2, -2)
+        r = QRectF(self.rect()).adjusted(3, 3, -3, -3)
         now = time.perf_counter()
         level = flicker_level(self.freq, now)
-        bg = QColor("#0a0b0e")
+        bg = QColor("#0d131c")
         if not self.off and Flicker.style == "box":
             v = int(255 * level)
             bg = QColor(v, v, v)
-        p.setPen(Qt.NoPen)
+        p.setPen(QPen(QColor(LINE), 1))
         p.setBrush(bg)
-        p.drawRoundedRect(r, 10, 10)
+        p.drawRoundedRect(r, 18, 18)
         if not self.off and Flicker.style == "glow":
-            paint_glow(p, r.center(), min(r.width(), r.height()) * 0.475, level)
-        if now < self.hit_until:
+            paint_glow(p, r.center(), min(r.width(), r.height()) * 0.44, level)
+        if now < self.hit_until:  # selected: mint outline and tint
             p.setPen(QPen(QColor(ACCENT), 3))
-            p.setBrush(Qt.NoBrush)
-            p.drawRoundedRect(r, 10, 10)
+            p.setBrush(QColor(52, 211, 153, 40))
+            p.drawRoundedRect(r, 18, 18)
         arrow = QColor(ARROW)
-        arrow.setAlphaF(0.3 if self.off else 1.0)
+        arrow.setAlphaF(0.25 if self.off else 1.0)
         p.setPen(arrow)
-        p.setFont(QFont("Segoe UI", 30 if len(GLYPH[self.act]) == 1 else 20, QFont.Bold))
+        p.setFont(QFont(FONT_DISPLAY, 34 if len(GLYPH[self.act]) == 1 else 21, QFont.Bold))
         p.drawText(r, Qt.AlignCenter, GLYPH[self.act])
+        # small rate label in a pill at the bottom
+        label = "off" if self.off else f"{self.freq:g} Hz"
+        p.setFont(QFont(FONT, 8, QFont.DemiBold))
+        w = p.fontMetrics().horizontalAdvance(label) + 16
+        pill = QRectF(r.center().x() - w / 2, r.bottom() - 26, w, 18)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(255, 255, 255, 18))
+        p.drawRoundedRect(pill, 9, 9)
         p.setPen(QColor(MUTED))
-        p.setFont(QFont("Segoe UI", 9))
-        p.drawText(r.adjusted(0, 0, 0, -6), Qt.AlignHCenter | Qt.AlignBottom, f"{self.freq:g} Hz")
+        p.drawText(pill, Qt.AlignCenter, label)
 
 
 class PdfView(QWidget):
@@ -199,7 +249,11 @@ class PdfView(QWidget):
         self.page, self.zoom, self.x, self.y = 0, 1.0, 0.0, 0.0
         self.shown = [0.0, 0.0, 0.0]
         self.arrows_on = True
+        self.M = 16  # margin around the page, so it sits on a "desk" with a shadow
         self.setMinimumSize(200, 200)
+
+    def inner(self):
+        return max(1, self.width() - 2 * self.M), max(1, self.height() - 2 * self.M)
 
     def load(self, path):
         """Show a different PDF (from Open file / drag-and-drop)."""
@@ -217,11 +271,12 @@ class PdfView(QWidget):
         return self.cache[i]
 
     def scale(self):
-        return self.width() / self.image(self.page).width() * self.zoom
+        return self.inner()[0] / self.image(self.page).width() * self.zoom
 
     def limits(self):
         img, s = self.image(self.page), self.scale()
-        return max(0.0, img.width() * s - self.width()), max(0.0, img.height() * s - self.height())
+        iw, ih = self.inner()
+        return max(0.0, img.width() * s - iw), max(0.0, img.height() * s - ih)
 
     def clamp(self, snap=False):
         mx, my = self.limits()
@@ -237,7 +292,7 @@ class PdfView(QWidget):
 
     def move(self, d):
         mx, my = self.limits()
-        sx, sy = self.width() * 0.4, self.height() * 0.5
+        sx, sy = self.inner()[0] * 0.4, self.inner()[1] * 0.5
         if d == "down":
             if self.y >= my - 1:
                 return self.go_page(self.page + 1)
@@ -257,11 +312,12 @@ class PdfView(QWidget):
         self.clamp()
 
     def toggle_zoom(self):
+        iw, ih = self.inner()
         before = self.scale()
-        cx, cy = (self.x + self.width() / 2) / before, (self.y + self.height() / 2) / before
+        cx, cy = (self.x + iw / 2) / before, (self.y + ih / 2) / before
         self.zoom = 1.0 if self.zoom != 1.0 else ZOOM_IN
         after = self.scale()
-        self.x, self.y = cx * after - self.width() / 2, cy * after - self.height() / 2
+        self.x, self.y = cx * after - iw / 2, cy * after - ih / 2
         self.clamp()
         return self.zoom != 1.0
 
@@ -276,23 +332,35 @@ class PdfView(QWidget):
 
     def paintEvent(self, e):
         p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
         p.setRenderHint(QPainter.SmoothPixmapTransform)
-        p.fillRect(self.rect(), Qt.white)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor("#151d29"))
+        p.drawRoundedRect(QRectF(self.rect()), 16, 16)
         x, y, s = self.shown
         if s <= 0:
             self.shown = [self.x, self.y, self.scale()]
             x, y, s = self.shown
         img = self.image(self.page)
-        p.drawImage(QRectF(-x, -y, img.width() * s, img.height() * s), img)
-        info = (f"page {self.page + 1} / {self.pages} · {'fit' if self.zoom == 1 else f'{self.zoom}×'}"
-                f" · arrows {'on' if self.arrows_on else 'off'}")
-        p.setFont(QFont("Segoe UI", 9))
-        w = p.fontMetrics().horizontalAdvance(info) + 16
-        box = QRectF(self.width() - w - 8, self.height() - 30, w, 22)
-        p.setPen(Qt.NoPen)
-        p.setBrush(QColor(0, 0, 0, 170))
-        p.drawRoundedRect(box, 4, 4)
-        p.setPen(Qt.white)
+        M, (iw, ih) = self.M, self.inner()
+        page = QRectF(M - x, M - y, img.width() * s, img.height() * s)
+        view = QRectF(M, M, iw, ih)
+        shown = page.intersected(view)
+        for i, a in ((10, 18), (6, 28), (3, 40)):  # soft shadow
+            p.setBrush(QColor(0, 0, 0, a))
+            p.drawRoundedRect(shown.adjusted(-i, -i + 3, i, i + 3), 10, 10)
+        p.save()
+        p.setClipRect(view)
+        p.drawImage(page, img)
+        p.restore()
+        info = (f"page {self.page + 1} / {self.pages}  ·  {'fit' if self.zoom == 1 else f'{self.zoom:g}×'}"
+                f"  ·  arrows {'on' if self.arrows_on else 'off'}")
+        p.setFont(QFont(FONT, 9, QFont.DemiBold))
+        w = p.fontMetrics().horizontalAdvance(info) + 24
+        box = QRectF(self.width() - w - M - 8, self.height() - M - 36, w, 26)
+        p.setBrush(QColor(11, 15, 22, 215))
+        p.drawRoundedRect(box, 13, 13)
+        p.setPen(QColor(TEXT))
         p.drawText(box, Qt.AlignCenter, info)
 
 
@@ -300,7 +368,7 @@ def top_bar(title, on_home):
     bar = QWidget(objectName="bar")
     h = QHBoxLayout(bar)
     h.setContentsMargins(14, 8, 14, 8)
-    home = QPushButton("← Home")
+    home = QPushButton("⌂  Home")
     home.setFocusPolicy(Qt.NoFocus)
     home.clicked.connect(on_home)
     h.addWidget(home)
@@ -318,15 +386,20 @@ OPEN_FILTER = ("Documents and media (*.pdf *.mp3 *.wav *.m4a *.ogg *.flac *.aac 
                "*.webm *.m4v *.wmv);;PDF (*.pdf);;Audio (*.mp3 *.wav *.m4a *.ogg *.flac *.aac *.wma);;"
                "Video (*.mp4 *.mov *.mkv *.avi *.webm *.m4v *.wmv)")
 VIEWER_STYLE = f"""
-QPushButton#bigtab {{ font-size:15pt; padding:10px 22px; border-radius:10px; min-height:44px; }}
-QPushButton#bigtab:checked {{ background:#1d3326; border:2px solid {ACCENT}; }}
-QPushButton#bigctl {{ font-size:16pt; padding:12px 18px; border-radius:12px; min-height:58px;
-                      background:{PANEL}; border:2px solid {LINE}; }}
-QPushButton#bigctl:hover {{ border-color:{ACCENT}; }}
-QPushButton#bigopen {{ font-size:15pt; padding:10px 22px; border-radius:10px; min-height:44px;
-                       background:{ACCENT}; color:#08110c; border:none; font-weight:700; }}
-QPushButton#bighome {{ font-size:14pt; padding:10px 18px; border-radius:10px; min-height:44px; }}
-QLabel#filename {{ font-size:13pt; color:{TEXT}; background:transparent; padding:4px 2px; }}
+#segment {{ background:{PANEL2}; border:1px solid {LINE}; border-radius:14px; }}
+QPushButton#seg {{ background:transparent; border:1px solid transparent; font-size:14pt; padding:8px 22px;
+                   border-radius:10px; min-height:40px; color:{MUTED}; }}
+QPushButton#seg:hover {{ color:{TEXT}; background:#1f2a39; }}
+QPushButton#seg:checked {{ background:{ACCENT_SOFT}; border:1px solid {ACCENT}; color:#d6fbe8; }}
+QPushButton#bigctl {{ font-size:15pt; padding:12px 18px; border-radius:16px; min-height:60px;
+                      background:{PANEL2}; border:1px solid {LINE}; }}
+QPushButton#bigctl:hover {{ border-color:{ACCENT}; background:#1c2734; }}
+QPushButton#bigctl:pressed {{ background:{ACCENT_SOFT}; }}
+QPushButton#bigopen {{ font-size:14pt; padding:10px 22px; border-radius:12px; min-height:40px;
+                       background:{MINT_GRADIENT}; color:#06140f; border:none; font-weight:700; }}
+QPushButton#bigopen:hover {{ background:qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #5af0b4, stop:1 #38d4c6); }}
+QPushButton#bighome {{ font-size:13pt; padding:10px 18px; border-radius:12px; min-height:40px; }}
+QLabel#filename {{ font-size:12.5pt; color:{TEXT}; background:transparent; padding:2px 4px; font-weight:600; }}
 """
 
 
@@ -361,10 +434,15 @@ class ViewerPage(QWidget):
         top.addWidget(home)
         top.addSpacing(8)
         self.tab_buttons = QButtonGroup(self)
+        segment = QFrame(objectName="segment")
+        sl = QHBoxLayout(segment)
+        sl.setContentsMargins(4, 4, 4, 4)
+        sl.setSpacing(4)
         for i, label in enumerate(["📄  Read", "🎵  Listen", "🎬  Watch"]):
-            b = QPushButton(label, objectName="bigtab", checkable=True)
+            b = QPushButton(label, objectName="seg", checkable=True)
             self.tab_buttons.addButton(b, i)
-            top.addWidget(b)
+            sl.addWidget(b)
+        top.addWidget(segment)
         self.tab_buttons.button(0).setChecked(True)
         self.tab_buttons.idClicked.connect(lambda i: self.set_tab(TABS[i]))
         top.addSpacing(8)
@@ -373,8 +451,8 @@ class ViewerPage(QWidget):
         open_btn.clicked.connect(self.open_dialog)
         top.addWidget(open_btn)
         top.addStretch(1)
-        self.status = QLabel()
-        top.addWidget(self.status)
+        self.status = QLabel(objectName="pill")
+        top.addWidget(self.status, alignment=Qt.AlignVCenter)
         for w in bar.findChildren(QPushButton):
             w.setFocusPolicy(Qt.NoFocus)
 
@@ -478,7 +556,8 @@ class ViewerPage(QWidget):
         self.a_time.setStyleSheet("font-size:16pt;")
         self.a_bar = QSlider(Qt.Horizontal, enabled=False)
         self.a_bar.setFixedWidth(560)
-        v.addWidget(self.a_icon)
+        v.addWidget(self.a_icon, alignment=Qt.AlignCenter)
+        v.addSpacing(18)
         v.addWidget(self.a_bar, alignment=Qt.AlignCenter)
         v.addWidget(self.a_time)
         v.addStretch(1)
@@ -738,7 +817,7 @@ class ViewerPage(QWidget):
     def on_event(self, m):
         t = m["type"]
         if t == "status":
-            self.status.setText(status_html(m))
+            self.status.setText(status_html(m, compact=True))
         elif not self.isVisible():
             return
         elif t == "clench":
@@ -808,29 +887,43 @@ class CueCanvas(QWidget):
         self.flicker = None
         self.arrow = None
         self.phase = "idle"
+        self.listening = False
+        self.frac = 0.0  # how much of the current step has passed (0..1), drawn as a ring
         self.setMinimumSize(420, 360)
 
     def show_step(self, step):
         self.text, self.flicker, self.arrow, self.phase = step.text, step.flicker, step.arrow, step.phase
+        self.listening, self.frac = False, 0.0
         self.update()
 
     def show_listen(self, step):
         """While the voice reads the instruction: text and dot only, no flicker or arrow yet."""
-        self.text, self.sub, self.flicker, self.arrow, self.phase = step.text, "listen…", None, None, "rest"
+        self.text, self.sub, self.flicker, self.arrow, self.phase = step.text, "listen…", None, None, step.phase
+        self.listening, self.frac = True, 0.0
         self.update()
 
     def set_message(self, text, sub=""):
         self.text, self.sub, self.flicker, self.arrow, self.phase = text, sub, None, None, "idle"
+        self.listening, self.frac = False, 0.0
         self.update()
 
     def paintEvent(self, e):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         r = QRectF(self.rect())
-        p.fillRect(r, QColor("#08090b"))
-        c = r.center()
+        bg = QRadialGradient(r.center(), max(r.width(), r.height()) * 0.7)
+        bg.setColorAt(0, QColor("#0f1520"))
+        bg.setColorAt(1, QColor("#070a0f"))
+        p.setPen(Qt.NoPen)
+        p.setBrush(bg)
+        p.drawRoundedRect(r, 18, 18)
+        c = QPointF(r.center().x(), r.center().y() + 30)
+        active = self.phase in ("rest", "action", "settle") and not self.listening
+        color = QColor(ACCENT if self.phase == "action" else MUTED)
+
+        # the cue: flicker circle, or a dot to look at
+        rad = min(r.width(), r.height()) * 0.2
         if self.flicker:
-            rad = min(r.width(), r.height()) * 0.22
             level = flicker_level(self.flicker, time.perf_counter())
             if Flicker.style == "glow":
                 paint_glow(p, c, rad, level)
@@ -838,24 +931,55 @@ class CueCanvas(QWidget):
                 v = int(255 * level)
                 p.setPen(Qt.NoPen)
                 p.setBrush(QColor(v, v, v))
-                p.drawRoundedRect(QRectF(c.x() - rad * 0.7, c.y() - rad * 0.7, rad * 1.4, rad * 1.4), 12, 12)
+                p.drawRoundedRect(QRectF(c.x() - rad * 0.7, c.y() - rad * 0.7, rad * 1.4, rad * 1.4), 14, 14)
         elif self.phase != "idle":
             p.setPen(Qt.NoPen)
             p.setBrush(QColor(TEXT))
             p.drawEllipse(c, 7, 7)
+
+        # countdown ring: the arc shrinks as the step runs out
+        if active:
+            ring = rad * 1.25 if self.flicker else 46
+            box = QRectF(c.x() - ring, c.y() - ring, 2 * ring, 2 * ring)
+            p.setBrush(Qt.NoBrush)
+            p.setPen(QPen(QColor(LINE), 4))
+            p.drawEllipse(box)
+            pen = QPen(color, 4)
+            pen.setCapStyle(Qt.RoundCap)
+            p.setPen(pen)
+            p.drawArc(box, 90 * 16, -int(360 * 16 * max(0.0, 1.0 - self.frac)))
+
         if self.arrow:
             p.setPen(Qt.NoPen)
             p.setBrush(QColor(ARROW))
-            x = r.left() + 40 if self.arrow == "left" else r.right() - 40
+            x = r.left() + 44 if self.arrow == "left" else r.right() - 44
             d = 1 if self.arrow == "left" else -1
-            p.drawPolygon(QPolygonF([QPointF(x, c.y()), QPointF(x + d * 50, c.y() - 34), QPointF(x + d * 50, c.y() + 34)]))
-        color = {"action": ACCENT, "rest": MUTED, "settle": MUTED}.get(self.phase, TEXT)
-        p.setPen(QColor(color))
-        p.setFont(QFont("Segoe UI", 22 if self.phase == "action" else 18, QFont.Bold))
-        p.drawText(QRectF(20, 24, r.width() - 40, 90), Qt.AlignHCenter | Qt.AlignTop | Qt.TextWordWrap, self.text)
+            p.drawPolygon(QPolygonF([QPointF(x, c.y()), QPointF(x + d * 56, c.y() - 38), QPointF(x + d * 56, c.y() + 38)]))
+
+        # phase chip
+        chip = {"settle": "GET READY", "rest": "REST", "action": "DO IT"}.get(self.phase, "")
+        if self.listening:
+            chip = "LISTEN"
+        if chip:
+            p.setFont(QFont(FONT, 9, QFont.Bold))
+            w = p.fontMetrics().horizontalAdvance(chip) + 28
+            cr = QRectF(r.center().x() - w / 2, 26, w, 26)
+            chip_color = QColor(ACCENT if (self.phase == "action" and not self.listening) else "#7aa7ff" if self.listening else MUTED)
+            fill = QColor(chip_color)
+            fill.setAlpha(36)
+            p.setPen(QPen(chip_color, 1))
+            p.setBrush(fill)
+            p.drawRoundedRect(cr, 13, 13)
+            p.setPen(chip_color)
+            p.drawText(cr, Qt.AlignCenter, chip)
+
+        # instruction
+        p.setPen(QColor(ACCENT if (self.phase == "action" and not self.listening) else TEXT))
+        p.setFont(QFont(FONT_DISPLAY, 24 if self.phase == "action" else 20, QFont.Bold))
+        p.drawText(QRectF(40, 64, r.width() - 80, 100), Qt.AlignHCenter | Qt.AlignTop | Qt.TextWordWrap, self.text)
         p.setPen(QColor(MUTED))
-        p.setFont(QFont("Segoe UI", 12))
-        p.drawText(QRectF(20, r.height() - 60, r.width() - 40, 40), Qt.AlignHCenter | Qt.AlignVCenter, self.sub)
+        p.setFont(QFont(FONT, 13))
+        p.drawText(QRectF(20, r.height() - 56, r.width() - 40, 36), Qt.AlignHCenter | Qt.AlignVCenter, self.sub)
 
 
 METERS = [  # label, feature, scale, lo, hi, threshold setting
@@ -1279,6 +1403,7 @@ class CalibPage(QWidget):
         st = self.steps[self.i]
         in_step = local_clock() - self.cur_t0
         self.canvas.sub = f"{max(0.0, st.dur - in_step):.0f} s"
+        self.canvas.frac = min(1.0, in_step / max(st.dur, 0.1))
         self.canvas.update()
         self.progress.setValue(int(100 * (self.elapsed_before + in_step) / max(self.total_s, 1)))
         left = self.total_s - self.elapsed_before - in_step
@@ -1390,7 +1515,7 @@ class CalibPage(QWidget):
     # ---------- events
     def on_event(self, m):
         if m["type"] == "status":
-            self.status.setText(status_html(m))
+            self.status.setText(status_html(m, compact=True))
             if self.isVisible():
                 self.meters.set_values(m.get("features", {}), m.get("scores", {}))
         elif self.isVisible():
@@ -1429,29 +1554,83 @@ class CalibPage(QWidget):
 
 
 # =========================================================================== start page
+class ChoiceCard(QFrame):
+    """A big clickable card: icon, title, one-line description, arrow."""
+
+    def __init__(self, icon, title, desc, on_click):
+        super().__init__(objectName="card")
+        self.on_click = on_click
+        self.setAttribute(Qt.WA_Hover)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setMinimumHeight(140)
+        h = QHBoxLayout(self)
+        h.setContentsMargins(26, 22, 26, 22)
+        h.setSpacing(20)
+        h.addWidget(QLabel(icon, objectName="cardicon"), alignment=Qt.AlignTop)
+        v = QVBoxLayout()
+        v.setSpacing(6)
+        v.addWidget(QLabel(title, objectName="cardtitle"))
+        d = QLabel(desc, objectName="carddesc", wordWrap=True)
+        v.addWidget(d)
+        v.addStretch(1)
+        h.addLayout(v, 1)
+        h.addWidget(QLabel("→", objectName="cardarrow"), alignment=Qt.AlignVCenter)
+
+    def mousePressEvent(self, e):
+        self.on_click()
+
+
 class StartPage(QWidget):
     def __init__(self, main):
         super().__init__()
         self.main = main
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(40, 30, 40, 30)
-        outer.setSpacing(18)
-        outer.addWidget(QLabel("Hands-Free Viewer", objectName="h1"))
-        outer.addWidget(QLabel(f"Version {APP_VERSION} · Team 7 · look at glowing targets, clench your jaw, "
-                               "and more — read and watch without your hands", objectName="hint"))
+        outer.setContentsMargins(48, 34, 48, 26)
+        outer.setSpacing(22)
+
+        # ---- header: icon, name, tagline, live connection pill
+        header = QHBoxLayout()
+        header.setSpacing(18)
+        if (HERE / "icon.ico").exists():
+            logo = QLabel()
+            logo.setPixmap(QIcon(str(HERE / "icon.ico")).pixmap(64, 64))
+            header.addWidget(logo)
+        titles = QVBoxLayout()
+        titles.setSpacing(2)
+        titles.addWidget(QLabel("Hands-Free Viewer", objectName="h1"))
+        tag = QLabel("Look at a glowing target. Clench your jaw. Read, listen and watch — no hands needed.",
+                     objectName="hint")
+        tag.setStyleSheet("font-size:12pt;")
+        titles.addWidget(tag)
+        header.addLayout(titles)
+        header.addStretch(1)
+        self.conn_pill = QLabel(objectName="pill")
+        header.addWidget(self.conn_pill, alignment=Qt.AlignVCenter)
+        outer.addLayout(header)
+
+        def step_header(n, text):
+            h = QHBoxLayout()
+            h.setSpacing(12)
+            badge = QLabel(str(n), objectName="badge", alignment=Qt.AlignCenter)
+            h.addWidget(badge)
+            h.addWidget(QLabel(text, objectName="h2"))
+            h.addStretch(1)
+            return h
 
         row = QHBoxLayout()
         row.setSpacing(18)
         # ---- profile
         prof = QFrame(objectName="panel")
         pv = QVBoxLayout(prof)
-        pv.addWidget(QLabel("1 · Who is wearing the headset?", objectName="h2"))
+        pv.setContentsMargins(22, 20, 22, 20)
+        pv.setSpacing(12)
+        pv.addLayout(step_header(1, "Who is wearing the headset?"))
         pr = QHBoxLayout()
         self.profile_box = QComboBox()
         self.profile_box.setMinimumWidth(200)
         self.profile_box.activated.connect(lambda i: self.main.set_profile(self.profile_box.itemText(i)))
         pr.addWidget(self.profile_box, 1)
-        new = QPushButton("New profile…")
+        new = QPushButton("＋  New profile")
         new.clicked.connect(self.new_profile)
         pr.addWidget(new)
         pv.addLayout(pr)
@@ -1463,7 +1642,9 @@ class StartPage(QWidget):
         # ---- headset
         head = QFrame(objectName="panel")
         hv = QVBoxLayout(head)
-        hv.addWidget(QLabel("2 · Connect the headset", objectName="h2"))
+        hv.setContentsMargins(22, 20, 22, 20)
+        hv.setSpacing(12)
+        hv.addLayout(step_header(2, "Connect the headset"))
         self.rb_real = QRadioButton("Real headset (eego over LSL)")
         self.rb_fake = QRadioButton("Practice headset (fake signals, keyboard-controlled)")
         self.rb_real.setChecked(True)
@@ -1472,7 +1653,7 @@ class StartPage(QWidget):
         self.stream_box = QComboBox()
         self.stream_box.addItem("Best EEG stream found", None)
         sr.addWidget(self.stream_box, 1)
-        self.search_btn = QPushButton("Search")
+        self.search_btn = QPushButton("⟳  Search")
         self.search_btn.clicked.connect(self.search)
         sr.addWidget(self.search_btn)
         hv.addLayout(sr)
@@ -1490,18 +1671,16 @@ class StartPage(QWidget):
         row.addWidget(head, 1)
         outer.addLayout(row)
 
-        # ---- the two choices
-        outer.addWidget(QLabel("3 · Choose what to do", objectName="h2"))
+        # ---- the two choices, as big cards
+        outer.addLayout(step_header(3, "Choose what to do"))
         choices = QHBoxLayout()
         choices.setSpacing(18)
-        cal = QPushButton("Calibrate && test\n\nGuided calibration of every input, live test with scores, "
-                          "and live signal meters. Saved to the profile.", objectName="big")
-        use = QPushButton("Use the viewer\n\nRead a PDF, play audio and video, hands-free, "
-                          "with this profile's settings.", objectName="big")
-        for b, page in ((cal, "calib"), (use, "viewer")):
-            b.setMinimumHeight(150)
-            b.clicked.connect(lambda _=False, p=page: self.main.go(p))
-            choices.addWidget(b, 1)
+        choices.addWidget(ChoiceCard("🧪", "Calibrate & test",
+                                     "Guided calibration of every signal, a scored live test and live meters — "
+                                     "saved to this person's profile.", lambda: self.main.go("calib")), 1)
+        choices.addWidget(ChoiceCard("📖", "Use the viewer",
+                                     "Read PDFs, listen to audio and watch video hands-free, "
+                                     "with this person's settings.", lambda: self.main.go("viewer")), 1)
         outer.addLayout(choices)
         outer.addStretch(1)
         foot = QHBoxLayout()
@@ -1571,6 +1750,7 @@ class StartPage(QWidget):
         if m["type"] != "status":
             return
         self.conn.setText(status_html(m))
+        self.conn_pill.setText(status_html(m, compact=True))
         if m.get("connected"):
             names = "" if m.get("names_from_stream", True) else \
                 " · channel names missing, assuming the standard eego 24 layout"
