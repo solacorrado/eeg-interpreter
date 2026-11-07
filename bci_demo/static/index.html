@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hands-Free Viewer</title>
+<style>
+  :root { --bg:#0d0f12; --panel:#171a20; --line:#2a2f38; --text:#e8eaed; --muted:#8b93a1; --accent:#4cc38a; --warn:#f2b84b; --arrow:#ff3b30; }
+  * { box-sizing:border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--text); font:15px/1.4 system-ui, sans-serif; }
+  body { display:flex; flex-direction:column; }
+  header { display:flex; align-items:center; gap:16px; padding:10px 16px; border-bottom:1px solid var(--line); background:var(--panel); flex-wrap:wrap; }
+  header h1 { font-size:16px; margin:0 8px 0 0; }
+  .tabs button { background:none; border:1px solid var(--line); color:var(--muted); padding:6px 14px; border-radius:6px; cursor:pointer; font:inherit; }
+  .tabs button.on { color:var(--text); border-color:var(--accent); }
+  #status { margin-left:auto; font-size:13px; color:var(--muted); display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
+  .dot { display:inline-block; width:9px; height:9px; border-radius:50%; background:#c44; margin-right:5px; }
+  .dot.ok { background:var(--accent); }
+  #scores { display:flex; gap:6px; }
+  .sc { font-variant-numeric:tabular-nums; padding:1px 6px; border-radius:4px; background:#222731; }
+  main { flex:1; min-height:0; position:relative; }
+  .view { position:absolute; inset:0; display:none; padding:12px; }
+  .view.on { display:grid; }
+  /* flicker targets */
+  .target { position:relative; overflow:hidden; display:flex; align-items:center; justify-content:center; border-radius:10px; color:var(--arrow); font-weight:800; font-size:44px; user-select:none; cursor:pointer; background:#0a0b0e; outline:3px solid transparent; transition:outline-color .15s; }
+  .target .glyph { position:relative; z-index:1; }
+  .target small { font-size:13px; color:var(--muted); position:absolute; bottom:6px; z-index:1; }
+  /* soft Gaussian blob: brightness falls off smoothly from the centre, no hard edges */
+  .glow { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); border-radius:50%; pointer-events:none;
+    background: radial-gradient(closest-side, rgba(255,255,255,1) 0%, rgba(255,255,255,.82) 25%, rgba(255,255,255,.46) 50%, rgba(255,255,255,.17) 75%, rgba(255,255,255,0) 100%); }
+  .ctl { display:flex; align-items:center; gap:6px; font-size:13px; color:var(--muted); }
+  .ctl input[type=range] { width:110px; accent-color:var(--accent); }
+  .ctl select { background:var(--bg); color:var(--text); border:1px solid var(--line); border-radius:5px; font:inherit; padding:2px 4px; }
+  .target.hit { outline-color:var(--accent); }
+  .target.off { opacity:.3; }
+  .target.off .glow { display:none; }
+  #jaw.on { color:var(--warn); }
+  /* PDF */
+  #pdfView { grid-template: 110px 1fr 110px / 110px 1fr 110px; gap:10px; }
+  #tUp { grid-area:1/2; } #tLeft { grid-area:2/1; } #tRight { grid-area:2/3; } #tDown { grid-area:3/2; }
+  #pdfPort { grid-area:2/2; position:relative; overflow:hidden; background:#fff; border-radius:6px; }
+  #pdfImg { position:absolute; left:0; top:0; transform-origin:0 0; transition:transform .35s ease; }
+  #pdfInfo { position:absolute; right:8px; bottom:8px; background:#000a; color:#fff; padding:3px 8px; border-radius:4px; font-size:13px; }
+  /* video */
+  #videoView { grid-template: 1fr / 150px 1fr 150px; gap:12px; align-items:stretch; }
+  #videoView video { width:100%; height:100%; background:#000; border-radius:6px; min-height:0; }
+  #videoView .target { font-size:34px; }
+  /* audio */
+  #audioView { place-items:center; }
+  .player { text-align:center; }
+  .big { font-size:120px; line-height:1; }
+  .bar { width:min(500px,80vw); height:8px; background:var(--line); border-radius:4px; margin:20px auto 8px; overflow:hidden; }
+  .bar div { height:100%; width:0; background:var(--accent); }
+  .hint { color:var(--muted); font-size:13px; }
+  #toast { position:fixed; left:50%; bottom:24px; transform:translateX(-50%); background:var(--panel); border:1px solid var(--accent); padding:8px 18px; border-radius:8px; opacity:0; transition:opacity .2s; pointer-events:none; font-size:16px; }
+  #toast.show { opacity:1; }
+  #start { position:fixed; inset:0; background:#000e; display:flex; align-items:center; justify-content:center; z-index:10; padding:16px; }
+  #start .card { max-width:520px; background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:24px; }
+  #start button { margin-top:12px; background:var(--accent); color:#000; border:0; padding:10px 22px; border-radius:8px; font:600 15px system-ui; cursor:pointer; }
+  kbd { background:#222731; border:1px solid var(--line); border-radius:4px; padding:0 5px; font-size:12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Hands-Free Viewer</h1>
+  <div class="tabs">
+    <button data-tab="pdf" class="on">PDF</button>
+    <button data-tab="audio">Audio</button>
+    <button data-tab="video">Video</button>
+  </div>
+  <label class="ctl" title="Lower = gentler on the eyes, but a weaker brain signal">Flicker
+    <input type="range" id="strength" min="10" max="100" step="5" value="60">
+    <b id="strengthVal">60%</b>
+  </label>
+  <label class="ctl">Style
+    <select id="style"><option value="glow">Soft glow</option><option value="box">Box</option></select>
+  </label>
+  <div id="status">
+    <span><span class="dot" id="dot"></span><span id="conn">connecting…</span></span>
+    <span id="scores"></span>
+    <span id="jaw">jaw <b id="emg">–</b>×</span>
+  </div>
+</header>
+
+<main>
+  <section class="view on" id="pdfView" data-tab="pdf">
+    <div class="target" id="tUp" data-act="up">▲</div>
+    <div class="target" id="tLeft" data-act="left">◀</div>
+    <div id="pdfPort"><img id="pdfImg" alt="PDF page"><div id="pdfInfo"></div></div>
+    <div class="target" id="tRight" data-act="right">▶</div>
+    <div class="target" id="tDown" data-act="down">▼</div>
+  </section>
+
+  <section class="view" id="audioView" data-tab="audio">
+    <div class="player">
+      <div class="big" id="aIcon">▶</div>
+      <div class="bar"><div id="aBar"></div></div>
+      <div id="aTime" class="hint">0:00</div>
+      <p class="hint">Clench twice quickly to play / pause · clench once to go back 15 s</p>
+      <audio id="audio" src="media/sample_audio.wav" preload="auto" loop></audio>
+    </div>
+  </section>
+
+  <section class="view" id="videoView" data-tab="video">
+    <div class="target" id="tBack" data-act="back">⏪15</div>
+    <video id="video" src="media/sample_video.mp4" preload="auto"></video>
+    <div class="target" id="tFwd" data-act="fwd">15⏩</div>
+  </section>
+</main>
+
+<div id="toast"></div>
+
+<div id="start">
+  <div class="card">
+    <h2 style="margin-top:0">Before you start</h2>
+    <p><b>Flashing warning:</b> the arrows flicker 12–15 times a second. Don't use this if you or anyone watching has photosensitive epilepsy.</p>
+    <p><b>How it works:</b> stare at a flickering arrow to press it.<br>
+      <b>PDF:</b> clench twice quickly to turn the arrows on/off; hold a clench ~1 s to zoom in/out.<br>
+      <b>Audio:</b> clench twice quickly to play/pause; clench once to go back 15 s.<br>
+      <b>Video:</b> clench to play/pause.</p>
+    <p class="hint"><b>Keyboard backup:</b> <kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> press an arrow. <kbd>J</kbd> is your jaw: tap = clench, tap twice = double clench, hold 1 s = held clench. You can also click an arrow. Use the Flicker slider to make the arrows gentler.</p>
+    <p id="fakeHelp" class="hint" style="display:none">Fake headset mode: hold <kbd>Shift</kbd> as well to send fake brain signals through the real detector instead (Shift+arrow = a fake look, takes about a second; Shift+J = a fake clench, as long as you hold it).</p>
+    <button id="go">Start</button>
+  </div>
+</div>
+
+<script>
+// Flicker rate (Hz) for each arrow. Each tab's rates must be different from each other.
+const FREQ = { up: 12, right: 13, down: 14, left: 15, back: 12, fwd: 15 };
+const TAB_ACTS = { pdf: ["up", "right", "down", "left"], audio: [], video: ["back", "fwd"] };
+const KEYS = { ArrowUp: "up", ArrowRight: "right", ArrowDown: "down", ArrowLeft: "left" };
+const VIDEO_KEYS = { ArrowLeft: "back", ArrowRight: "fwd" };
+
+let tab = "pdf", fake = false;
+const $ = (id) => document.getElementById(id);
+const targets = [...document.querySelectorAll(".target")];
+targets.forEach((t) => (t.innerHTML = `<div class="glow"></div><span class="glyph">${t.textContent}</span><small>${FREQ[t.dataset.act]} Hz</small>`));
+
+// ---------- flicker settings (remembered in this browser) ----------
+const store = { get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
+let strength = +store.get("strength", 60) / 100, style = store.get("style", "glow");
+$("strength").value = strength * 100; $("strengthVal").textContent = Math.round(strength * 100) + "%"; $("style").value = style;
+$("strength").oninput = (e) => { strength = e.target.value / 100; $("strengthVal").textContent = e.target.value + "%"; store.set("strength", e.target.value); };
+$("style").onchange = (e) => { style = e.target.value; store.set("style", style); applyStyle(); };
+// let go of the control after using it, so the arrow keys go back to driving the app
+["strength", "style"].forEach((id) => $(id).addEventListener("change", (e) => e.target.blur()));
+function applyStyle() {
+  for (const t of targets) { t.querySelector(".glow").style.display = style === "glow" ? "" : "none"; t.style.backgroundColor = ""; }
+  sizeGlows();
+}
+function sizeGlows() {
+  for (const t of targets) { const g = t.querySelector(".glow"), d = Math.min(t.clientWidth, t.clientHeight) * 0.95; g.style.width = g.style.height = d + "px"; }
+}
+window.addEventListener("resize", sizeGlows);
+
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(toast.h); toast.h = setTimeout(() => t.classList.remove("show"), 1200);
+}
+function post(url, body) {
+  return fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+}
+
+// ---------- tabs ----------
+function setTab(name) {
+  tab = name;
+  clearTimeout(singleTimer); lastClench = 0;
+  document.querySelectorAll(".tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === name));
+  document.querySelectorAll(".view").forEach((v) => v.classList.toggle("on", v.dataset.tab === name));
+  sendTargets();
+  if (name !== "audio") $("audio").pause();
+  if (name !== "video") $("video").pause();
+  if (name === "pdf") layoutPdf(false);
+  sizeGlows();
+}
+document.querySelectorAll(".tabs button").forEach((b) => (b.onclick = () => setTab(b.dataset.tab)));
+
+// ---------- flicker (smooth sine brightness, works on any monitor refresh rate) ----------
+// Brightness swings between 50% - strength/2 and 50% + strength/2 (100% strength = full black to full white).
+function flicker(now) {
+  const s = now / 1000;
+  for (const t of targets) {
+    if (!t.offsetParent || t.classList.contains("off")) continue;
+    const level = 0.5 + 0.5 * strength * Math.sin(2 * Math.PI * FREQ[t.dataset.act] * s);
+    if (style === "glow") t.firstChild.style.opacity = level.toFixed(3);
+    else { const v = Math.round(255 * level); t.style.backgroundColor = `rgb(${v},${v},${v})`; }
+  }
+  requestAnimationFrame(flicker);
+}
+
+// ---------- PDF ----------
+const pdf = { page: 0, pages: 1, zoom: 1, x: 0, y: 0 };
+const ZOOM_IN = 2.5;
+function loadPage(i, atBottom = false) {
+  pdf.page = Math.max(0, Math.min(pdf.pages - 1, i));
+  const img = $("pdfImg");
+  img.onload = () => { pdf.x = 0; pdf.y = atBottom ? 1e9 : 0; layoutPdf(false); };
+  img.src = `/api/page/${pdf.page}.png`;
+}
+function scale() { const img = $("pdfImg"); return img.naturalWidth ? ($("pdfPort").clientWidth / img.naturalWidth) * pdf.zoom : 1; }
+function limits() {
+  const img = $("pdfImg"), port = $("pdfPort"), s = scale();
+  return { mx: Math.max(0, img.naturalWidth * s - port.clientWidth), my: Math.max(0, img.naturalHeight * s - port.clientHeight) };
+}
+function layoutPdf(animate = true) {
+  const img = $("pdfImg"), { mx, my } = limits();
+  pdf.x = Math.max(0, Math.min(mx, pdf.x)); pdf.y = Math.max(0, Math.min(my, pdf.y));
+  img.style.transition = animate ? "" : "none";
+  img.style.transform = `translate(${-pdf.x}px, ${-pdf.y}px) scale(${scale()})`;
+  $("pdfInfo").textContent = `page ${pdf.page + 1} / ${pdf.pages} · ${pdf.zoom === 1 ? "fit" : pdf.zoom + "×"} · arrows ${arrowsOn ? "on" : "off"}`;
+}
+function pdfMove(dir) {
+  const port = $("pdfPort"), { mx, my } = limits();
+  const sx = port.clientWidth * 0.4, sy = port.clientHeight * 0.5;
+  if (dir === "down") { if (pdf.y >= my - 1) return loadPage(pdf.page + 1); pdf.y += sy; }
+  if (dir === "up") { if (pdf.y <= 1) return pdf.page > 0 && loadPage(pdf.page - 1, true); pdf.y -= sy; }
+  if (dir === "right") { if (pdf.x >= mx - 1) return loadPage(pdf.page + 1); pdf.x += sx; }
+  if (dir === "left") { if (pdf.x <= 1) return pdf.page > 0 && loadPage(pdf.page - 1); pdf.x -= sx; }
+  layoutPdf();
+}
+function pdfZoom() {
+  const port = $("pdfPort"), before = scale();
+  const cx = (pdf.x + port.clientWidth / 2) / before, cy = (pdf.y + port.clientHeight / 2) / before;
+  pdf.zoom = pdf.zoom === 1 ? ZOOM_IN : 1;  // alternate in / out
+  const after = scale();
+  pdf.x = cx * after - port.clientWidth / 2; pdf.y = cy * after - port.clientHeight / 2;
+  layoutPdf();
+  toast(pdf.zoom === 1 ? "Held clench → zoom out" : "Held clench → zoom in");
+}
+
+// PDF arrows on/off (double clench). Off = no flicker, and the detector stops looking for SSVEP.
+let arrowsOn = true;
+function sendTargets() {
+  const acts = tab === "pdf" && !arrowsOn ? [] : TAB_ACTS[tab];
+  post("/api/targets", { freqs: acts.map((a) => FREQ[a]) });
+}
+function setArrows(on) {
+  arrowsOn = on;
+  for (const t of targets) if (TAB_ACTS.pdf.includes(t.dataset.act)) { t.classList.toggle("off", !on); t.style.backgroundColor = ""; }
+  sendTargets();
+  layoutPdf();
+  toast(on ? "Double clench → arrows ON" : "Double clench → arrows OFF (read in peace)");
+}
+window.addEventListener("resize", () => layoutPdf(false));
+
+// ---------- media ----------
+function togglePlay(el, label) {
+  if (el.paused) { el.play().catch(() => toast("Click the page once to allow playback")); toast(`Jaw clench → play ${label}`); }
+  else { el.pause(); toast(`Jaw clench → pause ${label}`); }
+}
+function fmt(t) { t = Math.floor(t || 0); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`; }
+const audio = $("audio"), video = $("video");
+audio.ontimeupdate = () => { $("aBar").style.width = (100 * audio.currentTime / (audio.duration || 1)) + "%"; $("aTime").textContent = `${fmt(audio.currentTime)} / ${fmt(audio.duration)}`; };
+audio.onplay = audio.onpause = () => ($("aIcon").textContent = audio.paused ? "▶" : "❚❚");
+function skip(sec) { video.currentTime = Math.max(0, Math.min((video.duration || 0) - 0.1, video.currentTime + sec)); }
+
+// ---------- actions ----------
+function act(name) {
+  const el = targets.find((t) => t.dataset.act === name);
+  if (el) { el.classList.add("hit"); setTimeout(() => el.classList.remove("hit"), 400); }
+  if (["up", "down", "left", "right"].includes(name)) pdfMove(name);
+  if (name === "back") { skip(-15); toast("Back 15 s"); }
+  if (name === "fwd") { skip(15); toast("Forward 15 s"); }
+}
+// Jaw gestures:
+//   PDF:          double clench (2 quick clenches) = arrows on/off, hold ~1 s = zoom in/out (alternates)
+//   Audio:        double clench = play/pause, single clench = back 15 s
+//                 (a single only counts once DOUBLE_MS passes with no second clench)
+//   Video:        quick clench or hold = play/pause
+const DOUBLE_MS = 1500;
+let lastClench = 0, singleTimer = null;
+function clench() {
+  const now = performance.now(), isDouble = now - lastClench < DOUBLE_MS;
+  lastClench = isDouble ? 0 : now;
+  if (tab === "pdf") {
+    if (isDouble) setArrows(!arrowsOn);
+    else toast("Clench again to turn arrows " + (arrowsOn ? "off" : "on"));
+    return;
+  }
+  if (tab === "audio") {
+    clearTimeout(singleTimer);
+    if (isDouble) return togglePlay(audio, "audio");
+    toast("Back 15 s… (clench again now to play/pause instead)");
+    singleTimer = setTimeout(() => { audio.currentTime = Math.max(0, audio.currentTime - 15); toast("Back 15 s"); }, DOUBLE_MS);
+    return;
+  }
+  if (tab === "video") togglePlay(video, "video");
+}
+function hold() {
+  lastClench = 0;
+  if (tab === "pdf") pdfZoom();
+  else clench();
+}
+targets.forEach((t) => (t.onclick = () => act(t.dataset.act)));
+
+// ---------- events from the EEG server ----------
+const es = new EventSource("/events");
+es.onmessage = (e) => {
+  const m = JSON.parse(e.data);
+  if (m.type === "clench") clench();
+  if (m.type === "hold") hold();
+  if (m.type === "clench_start") $("jaw").classList.add("on");
+  if (m.type === "clench" || m.type === "clench_end") $("jaw").classList.remove("on");
+  if (m.type === "ssvep") {
+    const a = TAB_ACTS[tab].find((x) => FREQ[x] === m.freq);
+    if (a) { act(a); toast(`Looked at ${m.freq} Hz`); }
+  }
+  if (m.type === "status") {
+    $("dot").classList.toggle("ok", !!m.connected);
+    $("conn").textContent = m.connected ? `${m.stream}${m.fake ? " (fake)" : ""}${m.calibrating ? " · calibrating, stay still" : ""}` : (m.msg || "no EEG stream");
+    $("emg").textContent = m.emg ?? "–";
+    $("scores").innerHTML = Object.entries(m.scores || {}).map(([f, v]) => `<span class="sc" title="SSVEP match">${(+f)} Hz ${v.toFixed(2)}</span>`).join("");
+  }
+};
+es.onerror = () => { $("dot").classList.remove("ok"); $("conn").textContent = "server offline"; };
+
+// ---------- keyboard (demo backup) ----------
+// Arrow keys = press that arrow. J works like your jaw: tap = clench, tap twice = double
+// clench, hold 1 s = held clench. Works with or without a headset.
+// Fake-headset mode only: hold Shift as well to send FAKE BRAIN SIGNALS through the
+// real detectors instead (an arrow then takes about a second, like a real look).
+let held = null, jTimer = null, jHeld = false, jViaEEG = false, jDown = false;
+window.addEventListener("keydown", (e) => {
+  if (["INPUT", "SELECT"].includes(document.activeElement?.tagName)) return;
+  const map = tab === "video" ? VIDEO_KEYS : tab === "pdf" ? KEYS : {};
+  const viaEEG = fake && e.shiftKey;
+  if (e.key === "j" || e.key === "J") {
+    e.preventDefault();
+    if (e.repeat || jDown) return;
+    jDown = true; jViaEEG = viaEEG; jHeld = false;
+    $("jaw").classList.add("on");
+    if (viaEEG) return void post("/api/sim", { clench: "on" });
+    jTimer = setTimeout(() => { jHeld = true; hold(); }, 1000);
+  } else if (map[e.key]) {
+    e.preventDefault();
+    if (viaEEG) { if (!e.repeat) { held = e.key; post("/api/sim", { look: FREQ[map[e.key]] }); } }
+    else act(map[e.key]);
+  }
+});
+window.addEventListener("keyup", (e) => {
+  if (e.key === held) { held = null; post("/api/sim", { look: null }); }
+  if ((e.key === "j" || e.key === "J") && jDown) {
+    jDown = false;
+    $("jaw").classList.remove("on");
+    if (jViaEEG) return void post("/api/sim", { clench: "off" });
+    clearTimeout(jTimer);
+    if (!jHeld) clench();
+  }
+});
+
+// ---------- start ----------
+fetch("/api/pdf").then((r) => r.json()).then((d) => {
+  pdf.pages = d.pages; fake = d.fake;
+  if (fake) $("fakeHelp").style.display = "";
+  loadPage(0);
+});
+$("go").onclick = () => {
+  $("start").remove();
+  // unlock audio/video playback (browsers need one click first)
+  [audio, video].forEach((m) => { m.muted = true; m.play().then(() => { m.pause(); m.currentTime = 0; m.muted = false; }).catch(() => (m.muted = false)); });
+  setTab("pdf");
+  applyStyle();
+  requestAnimationFrame(flicker);
+};
+</script>
+</body>
+</html>

@@ -1,0 +1,15 @@
+[project]
+name = "eeg-interpreter"
+version = "0.1.0"
+description = "Hands-Free Viewer: control a PDF, audio and video with EEG (SSVEP gaze + jaw clench) over LSL"
+requires-python = ">=3.13"
+dependencies = [
+    "antio>=0.7.1",
+    "imageio-ffmpeg>=0.8.1",
+    "matplotlib>=3.11.2",
+    "mne>=1.13.2",
+    "numpy>=2.5.4",
+    "pylsl>=1.18.6",
+    "pypdfium2>=5.15.0",
+    "scipy>=1.18.1",
+]
