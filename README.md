@@ -28,7 +28,9 @@ eego headset ──LSL──▶ server.py ──▶ look detector  (O1, Oz, O2, 
 
 ## Results on a real brain
 
-First real session (wearer "Sola", ANT eego 24-channel cap, 500 Hz, 7.6 min):
+Two real sessions are in [`recordings/`](recordings/) (raw EEG, cues, detections, scores), with a
+side-by-side results table for both wearers. First real session (wearer1, ANT eego 24-channel cap,
+500 Hz, 7.6 min):
 
 | Signal | Result | Used in the viewer |
 |---|---|---|
@@ -38,7 +40,7 @@ First real session (wearer "Sola", ANT eego 24-channel cap, 500 Hz, 7.6 min):
 | Fist squeeze | right 81% in calibration, but the live detector never fired on it | ✗ |
 | Blink / glance / eyebrows | not testable in that session (recorded in a very noisy first 90 s, before spoken cues existed) | ✗ untested |
 
-Replaying her recording over LSL into the real app: staring at 11 Hz scrolled left, 13 Hz scrolled
+Replaying wearer1's recording over LSL into the real app: staring at 11 Hz scrolled left, 13 Hz scrolled
 up, the unused rates (10, 17, 19 Hz) fired nothing, and all 6 clenches toggled video play/pause.
 
 Blink findings from the same data: she blinked naturally 12.6×/min and double-blinked naturally
@@ -143,7 +145,7 @@ code, then re-score real recordings with it:
 ```bash
 uv run python bci_demo/reanalyze.py                       # list saved trials
 uv run python bci_demo/reanalyze.py latest                # re-score the newest one
-uv run python bci_demo/reanalyze.py all --profile Sola    # every trial for one wearer
+uv run python bci_demo/reanalyze.py all --profile wearer1   # every trial for one wearer
 uv run python bci_demo/reanalyze.py latest --csv          # also export eeg.csv (time + channels)
 ```
 

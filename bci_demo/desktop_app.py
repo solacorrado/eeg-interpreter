@@ -177,7 +177,7 @@ class Bridge(QObject):
 
 # =========================================================================== viewer pieces
 GLYPH = {"up": "▲", "right": "▶", "down": "▼", "left": "◀", "back": "◀◀ 15", "fwd": "15 ▶▶"}
-# Defaults = the best, well-spaced rates on the first real recording (Sola: 92-100% each).
+# Defaults = the best, well-spaced rates on the first real recording (wearer1: 92-100% each).
 # Each profile can override them with settings["viewer_rates"].
 FREQ = {"up": 13.0, "right": 9.0, "down": 15.0, "left": 11.0, "back": 9.0, "fwd": 13.0}
 TABS = ["pdf", "audio", "video"]

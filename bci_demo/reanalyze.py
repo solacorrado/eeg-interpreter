@@ -6,7 +6,7 @@ the real recordings instead of waiting for the next slot.
   uv run python bci_demo/reanalyze.py                       # list saved trials
   uv run python bci_demo/reanalyze.py latest                # newest trial
   uv run python bci_demo/reanalyze.py TRIAL_FOLDER          # a specific trial
-  uv run python bci_demo/reanalyze.py all --profile Sola    # every trial for one wearer
+  uv run python bci_demo/reanalyze.py all --profile wearer1   # every trial for one wearer
 Options:
   --profile NAME   use this profile's CURRENT settings for the live-test replay
   --csv            also write eeg.csv (time + every channel) into the trial folder,

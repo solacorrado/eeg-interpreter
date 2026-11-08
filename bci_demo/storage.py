@@ -50,7 +50,7 @@ DEFAULT_SETTINGS = {
     "fist_left_ratio": 0.6,   # C4 likewise
     "flicker_strength": 0.6,
     "flicker_style": "glow",
-    # viewer arrow rates: the best, well-spaced rates on the first real recording (Sola, 92-100%)
+    # viewer arrow rates: the best, well-spaced rates on the first real recording (wearer1, 92-100%)
     "viewer_rates": {"up": 13, "right": 9, "down": 15, "left": 11, "back": 9, "fwd": 13},
     "last_files": {},         # last PDF / audio / video opened, per kind
 }
