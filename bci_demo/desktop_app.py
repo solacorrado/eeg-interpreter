@@ -30,7 +30,7 @@ import pypdfium2 as pdfium
 from pylsl import local_clock
 from PySide6.QtCore import QEvent, QObject, QRectF, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QColor, QDesktopServices, QFont, QIcon, QImage, QLinearGradient, QPainter, QPen, QPolygonF, QRadialGradient
-from PySide6.QtCore import QPointF
+from PySide6.QtCore import QPoint, QPointF
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer, QSoundEffect
 from PySide6.QtMultimediaWidgets import QVideoWidget
 try:
@@ -52,12 +52,13 @@ from storage import Profile, TrialRecorder, data_dir, list_profiles, load_state,
 from version import APP_VERSION
 
 HERE = Path(__file__).parent
-# Design tokens: a calm graphite instrument panel with one signal-blue accent. The flicker targets
-# stay white glows with red arrows (they must be the brightest, most salient things on screen).
-BG, PANEL, PANEL2, LINE, TEXT, MUTED = "#0f1013", "#16181d", "#1d2027", "#2a2e37", "#edeff4", "#969caa"
-ACCENT, WARN, BAD, ARROW = "#7cc4ff", "#ffb454", "#ff6b6b", "#ff5a52"
-GOOD = "#5bd69b"
-ACCENT_SOFT, ACCENT_HI, ON_ACCENT = "#142636", "#a3d6ff", "#08131d"
+# Design tokens, from the team palette: charcoal #2C2B30, graphite #4F4F51, light grey #D6D6D6,
+# blush #F2C4CE and coral #F58F7C. Panels are small steps between charcoal and graphite. The flicker
+# targets stay white glows (the brightest thing on screen) with coral arrows.
+BG, PANEL, PANEL2, LINE, TEXT, MUTED = "#2C2B30", "#333238", "#3A393F", "#4F4F51", "#D6D6D6", "#9C9AA2"
+ACCENT, WARN, BAD, ARROW = "#F58F7C", "#F2C27C", "#E8606F", "#F58F7C"
+GOOD = "#8FD1A4"
+ACCENT_SOFT, ACCENT_HI, ON_ACCENT = "#4A3A3D", "#F2C4CE", "#2C2B30"
 # Atkinson Hyperlegible: made by the Braille Institute for low-vision readers. IBM Plex Mono: readouts.
 FONT, FONT_DISPLAY, MONO = "Atkinson Hyperlegible", "Atkinson Hyperlegible", "IBM Plex Mono"
 VERDICT_COLOR = {"Good": GOOD, "OK": WARN, "Poor": BAD}
@@ -73,22 +74,22 @@ QToolTip {{ background:{PANEL2}; color:{TEXT}; border:1px solid {LINE}; padding:
 #panel {{ background:{PANEL}; border:1px solid {LINE}; border-radius:14px; }}
 #panel QLabel, #panel QCheckBox, #panel QRadioButton {{ background:transparent; }}
 QPushButton {{ background:{PANEL2}; border:1px solid {LINE}; color:{TEXT}; padding:8px 16px; border-radius:8px; }}
-QPushButton:hover {{ background:#23262e; border-color:#3a4150; }}
-QPushButton:pressed {{ background:#111317; }}
-QPushButton:checked {{ background:{ACCENT_SOFT}; border-color:{ACCENT}; color:#dcefff; }}
-QPushButton:disabled {{ color:#4e5360; background:#121418; border-color:#1e2128; }}
+QPushButton:hover {{ background:#444349; border-color:#6A6A6E; }}
+QPushButton:pressed {{ background:#262529; }}
+QPushButton:checked {{ background:{ACCENT_SOFT}; border-color:{ACCENT}; color:#F2C4CE; }}
+QPushButton:disabled {{ color:#6E6D73; background:#303034; border-color:#3E3E42; }}
 QPushButton#primary {{ background:{MINT_GRADIENT}; color:{ON_ACCENT}; border:none; font-weight:700; padding:10px 18px; }}
 QPushButton#primary:hover {{ background:{ACCENT_HI}; }}
-QPushButton#primary:pressed {{ background:#5fb0ee; }}
-QPushButton#primary:disabled {{ background:#18232d; color:#4f5d6b; }}
+QPushButton#primary:pressed {{ background:#E07A67; }}
+QPushButton#primary:disabled {{ background:#3A393F; color:#6E6D73; }}
 QComboBox {{ background:{PANEL2}; border:1px solid {LINE}; border-radius:10px; padding:7px 12px; }}
-QComboBox:hover {{ border-color:#3a4150; }}
+QComboBox:hover {{ border-color:#6A6A6E; }}
 QComboBox::drop-down {{ border:none; width:26px; }}
 QComboBox QAbstractItemView {{ background:{PANEL2}; border:1px solid {LINE}; selection-background-color:{ACCENT_SOFT};
                                selection-color:{TEXT}; outline:none; padding:4px; }}
 QSlider::groove:horizontal {{ height:6px; background:{PANEL2}; border-radius:3px; }}
 QSlider::sub-page:horizontal {{ background:{MINT_GRADIENT}; border-radius:3px; }}
-QSlider::handle:horizontal {{ background:#eaf5ff; border:2px solid {ACCENT}; width:14px; margin:-6px 0; border-radius:9px; }}
+QSlider::handle:horizontal {{ background:#F2C4CE; border:2px solid {ACCENT}; width:14px; margin:-6px 0; border-radius:9px; }}
 QProgressBar {{ background:{PANEL2}; border:none; border-radius:4px; max-height:8px; text-align:center; }}
 QProgressBar::chunk {{ background:{MINT_GRADIENT}; border-radius:4px; }}
 QTabWidget::pane {{ border:1px solid {LINE}; border-radius:14px; background:{PANEL}; top:-1px; }}
@@ -100,17 +101,17 @@ QTableWidget {{ background:{PANEL}; alternate-background-color:{PANEL2}; gridlin
 QHeaderView::section {{ background:{PANEL}; color:{MUTED}; border:none; border-bottom:1px solid {LINE}; padding:6px;
                         font-weight:600; }}
 QScrollBar:vertical {{ background:transparent; width:10px; margin:2px; }}
-QScrollBar::handle:vertical {{ background:#2e323b; border-radius:4px; min-height:30px; }}
+QScrollBar::handle:vertical {{ background:#5A5A5E; border-radius:4px; min-height:30px; }}
 QScrollBar::add-line, QScrollBar::sub-line {{ height:0; width:0; }}
 QCheckBox {{ spacing:10px; }}
 QRadioButton {{ spacing:10px; }}
-QCheckBox::indicator, QRadioButton::indicator {{ width:16px; height:16px; border:1.5px solid #4a505d; background:{BG}; }}
+QCheckBox::indicator, QRadioButton::indicator {{ width:16px; height:16px; border:1.5px solid #77767C; background:{BG}; }}
 QCheckBox::indicator {{ border-radius:5px; }}
 QRadioButton::indicator {{ border-radius:9px; }}
 QCheckBox::indicator:checked, QRadioButton::indicator:checked {{ background:{ACCENT}; border-color:{ACCENT}; }}
 QCheckBox::indicator:hover, QRadioButton::indicator:hover {{ border-color:{ACCENT}; }}
 QCheckBox::indicator:disabled {{ border-color:{LINE}; }}
-#toast {{ background:rgba(22, 24, 29, 240); border:1px solid {ACCENT}; border-radius:14px; padding:10px 22px;
+#toast {{ background:rgba(51, 50, 56, 245); border:1px solid {ACCENT}; border-radius:14px; padding:10px 22px;
           font-size:13pt; color:{TEXT}; }}
 #big_icon {{ font-size:54pt; color:{ACCENT}; background:{ACCENT_SOFT}; border:2px solid {ACCENT};
              border-radius:90px; min-width:180px; max-width:180px; min-height:180px; max-height:180px; }}
@@ -122,7 +123,7 @@ QCheckBox::indicator:disabled {{ border-color:{LINE}; }}
 #bar #pill, #pill {{ background:{PANEL2}; border:1px solid {LINE}; border-radius:14px; padding:5px 14px;
           font-family:"{MONO}", "Cascadia Mono", monospace; font-size:9.5pt; }}
 #card {{ background:{PANEL}; border:1px solid {LINE}; border-radius:14px; }}
-#card:hover {{ border:1px solid {ACCENT}; background:#151d27; }}
+#card:hover {{ border:1px solid {ACCENT}; background:#3B3437; }}
 #cardkicker {{ color:{ACCENT}; font-family:"{MONO}", monospace; font-size:9pt; letter-spacing:1.5px; }}
 #chip {{ background:{PANEL2}; border:1px solid {LINE}; border-radius:13px; padding:4px 12px; font-size:10.5pt; }}
 #card QLabel {{ background:transparent; }}
@@ -220,7 +221,7 @@ class SignalStrip(QWidget):
         inner = r.adjusted(16, 30, -16, -12)
         n = self.vals.maxlen
         step = inner.width() / (n - 1)
-        grid = QColor("#20242c")
+        grid = QColor("#3E3D43")
         for k in range(0, n, 10):  # one line per second, like EEG paper
             x = inner.left() + k * step
             p.setPen(QPen(grid, 1))
@@ -362,7 +363,7 @@ class FlickerTarget(QWidget):
             p.restore()
         if now < self.hit_until:  # selected: an accent ring (glow) or outline (box)
             p.setPen(QPen(QColor(ACCENT), 3))
-            p.setBrush(QColor(124, 196, 255, 40))
+            p.setBrush(QColor(245, 143, 124, 45))
             if Flicker.style == "box":
                 p.drawRoundedRect(r, 18, 18)
             else:
@@ -385,7 +386,7 @@ class FlickerTarget(QWidget):
         w = p.fontMetrics().horizontalAdvance(label) + 16
         pill = QRectF(r.center().x() - w / 2, r.bottom() - 26, w, 18)
         p.setPen(Qt.NoPen)
-        p.setBrush(QColor(15, 16, 19, 200))
+        p.setBrush(QColor(36, 35, 40, 200))
         p.drawRoundedRect(pill, 9, 9)
         p.setPen(QColor(MUTED))
         p.drawText(pill, Qt.AlignCenter, label)
@@ -510,7 +511,7 @@ class PdfView(QWidget):
         p.setFont(QFont(MONO, 9, QFont.Medium))
         w = p.fontMetrics().horizontalAdvance(info) + 24
         box = QRectF(self.width() - w - M - 8, self.height() - M - 36, w, 26)
-        p.setBrush(QColor(15, 16, 19, 220))
+        p.setBrush(QColor(36, 35, 40, 225))
         p.drawRoundedRect(box, 13, 13)
         p.setPen(QColor(TEXT))
         p.drawText(box, Qt.AlignCenter, info)
@@ -545,7 +546,7 @@ QPushButton#seg:hover {{ color:{TEXT}; background:transparent; border-bottom:3px
 QPushButton#seg:checked {{ background:transparent; color:{TEXT}; border-bottom:3px solid {ACCENT}; }}
 QPushButton#bigctl {{ font-size:13.5pt; padding:8px 16px; border-radius:14px; min-height:48px;
                       background:{PANEL2}; border:1px solid {LINE}; }}
-QPushButton#bigctl:hover {{ border-color:{ACCENT}; background:#23262e; }}
+QPushButton#bigctl:hover {{ border-color:{ACCENT}; background:#444349; }}
 QPushButton#bigctl:pressed {{ background:{ACCENT_SOFT}; }}
 QPushButton#bigopen {{ font-size:13pt; padding:6px 18px; border-radius:10px; min-height:34px;
                        background:{MINT_GRADIENT}; color:{ON_ACCENT}; border:none; font-weight:700; }}
@@ -628,13 +629,43 @@ HELP_COMMON = [
 ]
 
 
+class Toast(QLabel):
+    """A short message in a floating pill. It is its own little window, so it is drawn above
+    video (which Windows puts on its own layer); the pill is painted here because style-sheet
+    backgrounds do not show on a see-through window."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setStyleSheet(f"background:transparent; border:none; color:{TEXT}; font-size:13pt;"
+                           f"padding:11px 24px;")
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setPen(QPen(QColor(ACCENT), 1.5))
+        p.setBrush(QColor(51, 50, 56, 245))
+        r = QRectF(self.rect()).adjusted(1, 1, -1, -1)
+        p.drawRoundedRect(r, r.height() / 2, r.height() / 2)
+        p.end()
+        super().paintEvent(e)
+
+
 class HelpOverlay(QFrame):
     """Large, easy-to-read instructions for the current tab, over a dimmed screen."""
+    shown = Signal(bool)  # the video hides while this is open (Windows draws video above widgets)
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        self.shown.emit(True)
+
+    def hideEvent(self, e):
+        super().hideEvent(e)
+        self.shown.emit(False)
 
     def __init__(self, parent):
         super().__init__(parent)
         self.setStyleSheet(f"""
-            HelpOverlay {{ background: rgba(6, 7, 9, 218); }}
+            HelpOverlay {{ background: rgba(24, 23, 27, 225); }}
             #helpcard {{ background:{PANEL}; border:1px solid {LINE}; border-radius:18px; }}
             #helpcard QLabel {{ background:transparent; }}
             #helptitle {{ font-family:"{FONT_DISPLAY}", "Segoe UI"; font-size:20pt; font-weight:700; }}
@@ -835,10 +866,15 @@ class ViewerPage(QWidget):
 
         self.help = HelpOverlay(self)
         self.help.hide()
+        self.help.shown.connect(lambda on: self.vw.setVisible(not on))
         self.help_shown_once = False
         self.mode = "jaw"
 
-        self.toast_label = QLabel(self, objectName="toast")
+        self.toast_label = Toast(self)
+        self.toast_label.setWindowFlags(Qt.ToolTip | Qt.FramelessWindowHint | Qt.NoDropShadowWindowHint)
+        self.toast_label.setAttribute(Qt.WA_TranslucentBackground)
+        self.toast_label.setAttribute(Qt.WA_ShowWithoutActivating)
+        self.toast_label.setAttribute(Qt.WA_TransparentForMouseEvents)
         self.toast_label.hide()
         self.toast_timer = QTimer(self, singleShot=True, timeout=self.toast_label.hide)
         self.single_timer = QTimer(self, singleShot=True, timeout=self.audio_back)
@@ -942,6 +978,10 @@ class ViewerPage(QWidget):
         self.targets["fwd"].setFixedWidth(160)
         vw = QVideoWidget()
         vw.setFocusPolicy(Qt.NoFocus)
+        keep = vw.sizePolicy()
+        keep.setRetainSizeWhenHidden(True)  # hiding it (under the help card) must not reflow the tab
+        vw.setSizePolicy(keep)
+        self.vw = vw
         self.video = QMediaPlayer(self)
         self.video_out = QAudioOutput(self)
         self.video.setAudioOutput(self.video_out)
@@ -1138,6 +1178,7 @@ class ViewerPage(QWidget):
         self.help.setGeometry(self.rect())
 
     def deactivate(self):
+        self.toast_label.hide()
         self.main.engine.set_inputs(None)
         self.audio.pause()
         self.video.pause()
@@ -1152,9 +1193,18 @@ class ViewerPage(QWidget):
 
     # ---------- helpers
     def toast(self, msg):
+        # it is a floating window, so only show it while this app is the one in front
+        if not self.isVisible() or not self.window().isActiveWindow():
+            return
         self.toast_label.setText(msg)
         self.toast_label.adjustSize()
-        self.toast_label.move((self.width() - self.toast_label.width()) // 2, self.stack.y() + 14)
+        # over the page / video itself, never over a flicker target (that would disturb its signal)
+        area = {"pdf": self.pdf, "video": self.vw}.get(self.tab, self.stack)
+        if not area.isVisible():
+            area = self.stack
+        top = 30 if area is self.pdf else 16
+        pos = area.mapToGlobal(QPoint((area.width() - self.toast_label.width()) // 2, top))
+        self.toast_label.move(pos)
         self.toast_label.show()
         self.toast_label.raise_()
         self.toast_timer.start(1500)
@@ -1466,8 +1516,8 @@ class CueCanvas(QWidget):
         p.setRenderHint(QPainter.Antialiasing)
         r = QRectF(self.rect())
         bg = QRadialGradient(r.center(), max(r.width(), r.height()) * 0.7)
-        bg.setColorAt(0, QColor("#15171c"))
-        bg.setColorAt(1, QColor("#09090b"))
+        bg.setColorAt(0, QColor("#333238"))
+        bg.setColorAt(1, QColor("#252429"))
         p.setPen(Qt.NoPen)
         p.setBrush(bg)
         p.drawRoundedRect(r, 18, 18)
@@ -1518,7 +1568,7 @@ class CueCanvas(QWidget):
             p.setFont(QFont(FONT, 9, QFont.Bold))
             w = p.fontMetrics().horizontalAdvance(chip) + 28
             cr = QRectF(r.center().x() - w / 2, 26, w, 26)
-            chip_color = QColor(ACCENT if (self.phase == "action" and not self.listening) else "#c3b5ff" if self.listening else MUTED)
+            chip_color = QColor(ACCENT if (self.phase == "action" and not self.listening) else "#F2C4CE" if self.listening else MUTED)
             fill = QColor(chip_color)
             fill.setAlpha(36)
             p.setPen(QPen(chip_color, 1))
@@ -1600,12 +1650,12 @@ class MeterPanel(QWidget):
                     over = v <= thrs[0]
                 else:
                     over = v >= thrs[0]
-                p.setBrush(QColor(ACCENT if over else "#4a5262"))
+                p.setBrush(QColor(ACCENT if over else "#5F5E64"))
                 p.drawRoundedRect(QRectF(min(zero, xv), y + 7, max(2.0, abs(xv - zero)), 6), 3, 3)
                 p.setPen(QColor(TEXT))
                 p.drawText(QRectF(x0 + w + 6, y, 54, 20), Qt.AlignVCenter | Qt.AlignLeft,
                            f"{v:.2f}" if abs(v) < 10 else f"{v:.0f}")
-            p.setPen(QPen(QColor("#ffffff"), 2))
+            p.setPen(QPen(QColor(TEXT), 2))
             for t in thrs:
                 xt = self._pos(t, scale, lo, hi, x0, w)
                 p.drawLine(QPointF(xt, y + 3), QPointF(xt, y + 17))
