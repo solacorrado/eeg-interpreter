@@ -7,6 +7,9 @@ EEG headset streaming over [LSL](https://labstreaminglayer.org/) (Lab Streaming 
 Built by Team 7 for the Neurotech @ NC State BCI Hackathon (Nov 2026), ANT Neuro
 track: *movement-based neurotech applications* on ANT Neuro's 24-channel eego system.
 
+**Presentation:** [Google Slides](https://docs.google.com/presentation/d/1OP6dhK9ur_DtLsBWIiw2houKhYR-aIac/edit?usp=sharing)
+(includes the demo video) · [PowerPoint copy](slides/HandsFreeViewer_Team7.pptx)
+
 ## How it works
 
 The web version's signal path (the desktop app adds more inputs, see below):
