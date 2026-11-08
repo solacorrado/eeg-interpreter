@@ -644,6 +644,7 @@ class HelpOverlay(QFrame):
             #helpdo {{ font-size:14pt; font-weight:600; color:{TEXT}; }}
             #helpwhat {{ font-size:12pt; color:{MUTED}; }}
             #helpsep {{ background:{LINE}; max-height:1px; min-height:1px; }}
+            #helpbody {{ background:transparent; }}
         """)
         outer = QVBoxLayout(self)
         outer.addStretch(1)
@@ -651,9 +652,9 @@ class HelpOverlay(QFrame):
         row.addStretch(1)
         self.card = QFrame(objectName="helpcard")
         self.card.setMaximumWidth(820)
-        self.lay = QVBoxLayout(self.card)
-        self.lay.setContentsMargins(34, 28, 34, 26)
-        self.lay.setSpacing(12)
+        self.card_lay = QVBoxLayout(self.card)
+        self.card_lay.setContentsMargins(34, 28, 34, 26)
+        self.body, self.shown_for = None, None
         row.addWidget(self.card, 6)
         row.addStretch(1)
         outer.addLayout(row)
@@ -664,15 +665,17 @@ class HelpOverlay(QFrame):
             self.hide()  # click outside the card to close
 
     def _clear(self):
-        while self.lay.count():
-            item = self.lay.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-            elif item.layout():
-                while item.layout().count():
-                    sub = item.layout().takeAt(0)
-                    if sub.widget():
-                        sub.widget().deleteLater()
+        """Throw away the old instructions in one piece (rows hold nested layouts, so deleting
+        item by item used to leave stray labels piled on top of the new ones)."""
+        if self.body is not None:
+            self.card_lay.removeWidget(self.body)
+            self.body.hide()
+            self.body.deleteLater()
+        self.body = QWidget(objectName="helpbody")
+        self.lay = QVBoxLayout(self.body)
+        self.lay.setContentsMargins(0, 0, 0, 0)
+        self.lay.setSpacing(12)
+        self.card_lay.addWidget(self.body)
 
     SYMBOL = {"👀": "◉", "😬": "J", "⏱": "◷", "😌": "~", "⏪": "«", "⏩": "»", "😉": "◡", "🙄": "↻",
               "🖱": "↖", "📂": "+", "⌨": "⌨", "ℹ": "i"}
@@ -690,6 +693,9 @@ class HelpOverlay(QFrame):
         self.lay.addLayout(h)
 
     def set_tab(self, tab, mode="jaw"):
+        if self.shown_for == (tab, mode):  # already showing these instructions
+            return
+        self.shown_for = (tab, mode)
         self._clear()
         title, rows = {"blink": HELP_BLINK, "roll": HELP_ROLL}.get(mode, HELP)[tab]
         self.lay.addWidget(QLabel(f"How to use — {title}", objectName="helptitle"))
