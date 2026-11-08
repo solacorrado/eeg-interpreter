@@ -29,7 +29,7 @@ import numpy as np
 import pypdfium2 as pdfium
 from pylsl import local_clock
 from PySide6.QtCore import QEvent, QObject, QRectF, Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QColor, QDesktopServices, QFont, QIcon, QImage, QPainter, QPen, QPolygonF, QRadialGradient
+from PySide6.QtGui import QColor, QDesktopServices, QFont, QIcon, QImage, QLinearGradient, QPainter, QPen, QPolygonF, QRadialGradient
 from PySide6.QtCore import QPointF
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer, QSoundEffect
 from PySide6.QtMultimediaWidgets import QVideoWidget
@@ -38,7 +38,7 @@ try:
 except ImportError:  # speech is optional
     QTextToSpeech = None
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QComboBox, QFileDialog, QFrame, QGridLayout,
-                               QMenu, QWidgetAction,
+                               QMenu, QWidgetAction, QSizePolicy,
                                QHBoxLayout,
                                QHeaderView, QInputDialog, QLabel, QLineEdit, QMainWindow, QMessageBox, QProgressBar,
                                QPushButton, QRadioButton, QSlider, QStackedWidget, QTableWidget, QTableWidgetItem,
@@ -68,7 +68,7 @@ STYLE = f"""
 QWidget {{ background:{BG}; color:{TEXT}; font-family:"{FONT}", "Segoe UI"; font-size:10.5pt; }}
 QPushButton#primary, QPushButton#bigopen {{ letter-spacing:0.2px; }}
 QToolTip {{ background:{PANEL2}; color:{TEXT}; border:1px solid {LINE}; padding:6px 8px; }}
-#bar {{ background:{PANEL}; border-bottom:1px solid {LINE}; }}
+#bar {{ background:{BG}; border-bottom:1px solid {LINE}; }}
 #bar QLabel, #bar QSlider {{ background:transparent; }}
 #panel {{ background:{PANEL}; border:1px solid {LINE}; border-radius:14px; }}
 #panel QLabel, #panel QCheckBox, #panel QRadioButton {{ background:transparent; }}
@@ -122,13 +122,15 @@ QCheckBox::indicator:disabled {{ border-color:{LINE}; }}
 #bar #pill, #pill {{ background:{PANEL2}; border:1px solid {LINE}; border-radius:14px; padding:5px 14px;
           font-family:"{MONO}", "Cascadia Mono", monospace; font-size:9.5pt; }}
 #card {{ background:{PANEL}; border:1px solid {LINE}; border-radius:14px; }}
-#card:hover {{ border:1px solid {ACCENT}; background:#182330; }}
+#card:hover {{ border:1px solid {ACCENT}; background:#151d27; }}
+#cardkicker {{ color:{ACCENT}; font-family:"{MONO}", monospace; font-size:9pt; letter-spacing:1.5px; }}
+#chip {{ background:{PANEL2}; border:1px solid {LINE}; border-radius:13px; padding:4px 12px; font-size:10.5pt; }}
 #card QLabel {{ background:transparent; }}
-#cardtitle {{ font-family:"{FONT_DISPLAY}", "Segoe UI"; font-size:17pt; font-weight:700; }}
+#cardtitle {{ font-family:"{FONT_DISPLAY}", "Segoe UI"; font-size:21pt; font-weight:700; }}
 #cardicon {{ font-size:22pt; color:{ACCENT}; border:1.5px solid {ACCENT}; border-radius:28px;
               min-width:56px; max-width:56px; min-height:56px; max-height:56px; qproperty-alignment:AlignCenter; }}
 #carddesc {{ color:{MUTED}; font-size:11pt; }}
-#cardarrow {{ color:{ACCENT}; font-size:20pt; font-weight:700; }}
+#cardarrow {{ color:{ACCENT}; font-size:26pt; font-weight:700; }}
 """
 
 
@@ -184,11 +186,17 @@ class SignalStrip(QWidget):
     """A small live trace of the jaw-muscle signal from the headset: it moves whenever data is
     arriving (and jumps on a clench), so anyone can see at a glance that the EEG is live."""
 
-    def __init__(self, width=150):
+    def __init__(self, width=150, big=False):
         super().__init__()
-        self.setFixedSize(width, 34)
-        self.vals = deque(maxlen=60)  # 6 s at 10 updates a second
-        self.live, self.clenching = False, False
+        self.big = big
+        if big:  # wide band across the start screen, drawn like EEG chart paper
+            self.setFixedHeight(86)
+            self.setMinimumWidth(200)
+            self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        else:
+            self.setFixedSize(width, 34)
+        self.vals = deque(maxlen=150 if big else 60)  # 15 s / 6 s at 10 updates a second
+        self.live, self.clenching, self.jaw = False, False, None
         self.setToolTip("Live signal from the headset (jaw muscle). It moves when data is arriving.")
 
     def push(self, m):
@@ -197,15 +205,76 @@ class SignalStrip(QWidget):
         self.live = bool(m.get("connected")) and not m.get("stalled")
         self.clenching = bool(m.get("clenching"))
         jaw = (m.get("features") or {}).get("jaw")
+        self.jaw = jaw if self.live else None
         if self.live and jaw:
             self.vals.append(math.log10(max(0.3, min(jaw, 300.0))))
         elif not self.live:
             self.vals.clear()
         self.update()
 
+    def paint_big(self, p):
+        r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        p.setPen(QPen(QColor(LINE), 1))
+        p.setBrush(QColor(PANEL))
+        p.drawRoundedRect(r, 14, 14)
+        inner = r.adjusted(16, 30, -16, -12)
+        n = self.vals.maxlen
+        step = inner.width() / (n - 1)
+        grid = QColor("#20242c")
+        for k in range(0, n, 10):  # one line per second, like EEG paper
+            x = inner.left() + k * step
+            p.setPen(QPen(grid, 1))
+            p.drawLine(QPointF(x, inner.top()), QPointF(x, inner.bottom()))
+        for k in range(5):
+            y = inner.top() + inner.height() * k / 4
+            p.setPen(QPen(grid, 1, Qt.SolidLine if k in (0, 4) else Qt.DotLine))
+            p.drawLine(QPointF(inner.left(), y), QPointF(inner.right(), y))
+        live = self.live and len(self.vals) >= 2
+        p.setFont(QFont(MONO, 8.5, QFont.Medium))
+        cap = r.adjusted(16, 8, -16, 0)
+        p.setPen(QColor(GOOD if live else MUTED))
+        p.drawText(cap, Qt.AlignLeft | Qt.AlignTop,
+                   "●  LIVE · jaw muscle (30–100 Hz) · 1 s grid" if live else "○  NO SIGNAL · connect the headset below")
+        if live and self.jaw is not None:
+            p.setPen(QColor(WARN if self.clenching else TEXT))
+            p.drawText(cap, Qt.AlignRight | Qt.AlignTop,
+                       f"{'CLENCH  ' if self.clenching else ''}{self.jaw:.1f}× rest")
+        if not live:
+            p.setPen(QPen(QColor(MUTED), 1, Qt.DashLine))
+            p.drawLine(QPointF(inner.left(), inner.center().y()), QPointF(inner.right(), inner.center().y()))
+            return
+        lo, hi = math.log10(0.3), math.log10(300.0)
+        pts = [QPointF(inner.left() + step * (i + n - len(self.vals)),
+                       inner.bottom() - inner.height() * (v - lo) / (hi - lo)) for i, v in enumerate(self.vals)]
+        col = QColor(WARN if self.clenching else ACCENT)
+        fill = QLinearGradient(0, inner.top(), 0, inner.bottom())
+        c1, c2 = QColor(col), QColor(col)
+        c1.setAlpha(70)
+        c2.setAlpha(0)
+        fill.setColorAt(0, c1)
+        fill.setColorAt(1, c2)
+        area = QPolygonF([QPointF(pts[0].x(), inner.bottom())] + pts + [QPointF(pts[-1].x(), inner.bottom())])
+        p.setPen(Qt.NoPen)
+        p.setBrush(fill)
+        p.drawPolygon(area)
+        pen = QPen(col, 2.0)
+        pen.setJoinStyle(Qt.RoundJoin)
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
+        p.drawPolyline(QPolygonF(pts))
+        p.setPen(Qt.NoPen)
+        halo = QColor(col)
+        halo.setAlpha(60)
+        p.setBrush(halo)
+        p.drawEllipse(pts[-1], 7, 7)
+        p.setBrush(col)
+        p.drawEllipse(pts[-1], 3.4, 3.4)
+
     def paintEvent(self, e):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
+        if self.big:
+            return self.paint_big(p)
         r = QRectF(self.rect()).adjusted(1, 1, -1, -1)
         p.setPen(QPen(QColor(LINE), 1))
         p.setBrush(QColor(PANEL2))
@@ -271,13 +340,15 @@ class FlickerTarget(QWidget):
         r = QRectF(self.rect()).adjusted(3, 3, -3, -3)
         now = time.perf_counter()
         level = flicker_level(self.freq, now)
-        bg = QColor("#0c0d10")
-        if not self.off and Flicker.style == "box":
-            v = int(255 * level)
-            bg = QColor(v, v, v)
-        p.setPen(QPen(QColor(LINE), 1))
-        p.setBrush(bg)
-        p.drawRoundedRect(r, 18, 18)
+        if Flicker.style == "box":  # classic square: the whole tile flashes
+            v = int(255 * level) if not self.off else 12
+            p.setPen(QPen(QColor(LINE), 1))
+            p.setBrush(QColor(v, v, v))
+            p.drawRoundedRect(r, 18, 18)
+        elif self.off:  # glow switched off: only a faint outline marks where it sits
+            p.setPen(QPen(QColor(LINE), 1.2, Qt.DashLine))
+            p.setBrush(Qt.NoBrush)
+            p.drawEllipse(r.adjusted(r.width() * 0.08, r.height() * 0.08, -r.width() * 0.08, -r.height() * 0.08))
         if not self.off and Flicker.style == "glow":
             # stretch the soft glow into an oval that fills the whole tile: much more flickering
             # area (= stronger brain response) than a circle limited by the tile's short side
@@ -288,10 +359,13 @@ class FlickerTarget(QWidget):
             p.scale(rx / rad, ry / rad)
             paint_glow(p, QPointF(0, 0), rad, level)
             p.restore()
-        if now < self.hit_until:  # selected: mint outline and tint
+        if now < self.hit_until:  # selected: an accent ring (glow) or outline (box)
             p.setPen(QPen(QColor(ACCENT), 3))
             p.setBrush(QColor(124, 196, 255, 40))
-            p.drawRoundedRect(r, 18, 18)
+            if Flicker.style == "box":
+                p.drawRoundedRect(r, 18, 18)
+            else:
+                p.drawEllipse(r.adjusted(4, 4, -4, -4))
         arrow = QColor(ARROW)
         arrow.setAlphaF(0.25 if self.off else 1.0)
         p.setPen(arrow)
@@ -310,7 +384,7 @@ class FlickerTarget(QWidget):
         w = p.fontMetrics().horizontalAdvance(label) + 16
         pill = QRectF(r.center().x() - w / 2, r.bottom() - 26, w, 18)
         p.setPen(Qt.NoPen)
-        p.setBrush(QColor(255, 255, 255, 18))
+        p.setBrush(QColor(15, 16, 19, 200))
         p.drawRoundedRect(pill, 9, 9)
         p.setPen(QColor(MUTED))
         p.drawText(pill, Qt.AlignCenter, label)
@@ -413,8 +487,6 @@ class PdfView(QWidget):
         p.setRenderHint(QPainter.Antialiasing)
         p.setRenderHint(QPainter.SmoothPixmapTransform)
         p.setPen(Qt.NoPen)
-        p.setBrush(QColor("#17191e"))
-        p.drawRoundedRect(QRectF(self.rect()), 16, 16)
         x, y, s = self.shown
         if s <= 0:
             self.shown = [self.x, self.y, self.scale()]
@@ -424,7 +496,7 @@ class PdfView(QWidget):
         page = QRectF(M - x, M - y, img.width() * s, img.height() * s)
         view = QRectF(M, M, iw, ih)
         shown = page.intersected(view)
-        for i, a in ((10, 18), (6, 28), (3, 40)):  # soft shadow
+        for i, a in ((18, 14), (10, 24), (5, 38), (2, 60)):  # soft shadow: the page floats
             p.setBrush(QColor(0, 0, 0, a))
             p.drawRoundedRect(shown.adjusted(-i, -i + 3, i, i + 3), 10, 10)
         p.save()
@@ -465,19 +537,24 @@ OPEN_FILTER = ("Documents and media (*.pdf *.mp3 *.wav *.m4a *.ogg *.flac *.aac 
                "*.webm *.m4v *.wmv);;PDF (*.pdf);;Audio (*.mp3 *.wav *.m4a *.ogg *.flac *.aac *.wma);;"
                "Video (*.mp4 *.mov *.mkv *.avi *.webm *.m4v *.wmv)")
 VIEWER_STYLE = f"""
-#segment {{ background:{PANEL2}; border:1px solid {LINE}; border-radius:14px; }}
-QPushButton#seg {{ background:transparent; border:1px solid transparent; font-size:14pt; padding:8px 22px;
-                   border-radius:10px; min-height:40px; color:{MUTED}; }}
-QPushButton#seg:hover {{ color:{TEXT}; background:#23262e; }}
-QPushButton#seg:checked {{ background:{ACCENT_SOFT}; border:1px solid {ACCENT}; color:#dcefff; }}
+#segment {{ background:transparent; border:none; }}
+QPushButton#seg {{ background:transparent; border:none; border-bottom:3px solid transparent; border-radius:0;
+                   font-size:15pt; font-weight:700; padding:8px 14px 6px 14px; min-height:40px; color:{MUTED}; }}
+QPushButton#seg:hover {{ color:{TEXT}; background:transparent; border-bottom:3px solid {LINE}; }}
+QPushButton#seg:checked {{ background:transparent; color:{TEXT}; border-bottom:3px solid {ACCENT}; }}
 QPushButton#bigctl {{ font-size:13.5pt; padding:8px 16px; border-radius:14px; min-height:48px;
                       background:{PANEL2}; border:1px solid {LINE}; }}
 QPushButton#bigctl:hover {{ border-color:{ACCENT}; background:#23262e; }}
 QPushButton#bigctl:pressed {{ background:{ACCENT_SOFT}; }}
-QPushButton#bigopen {{ font-size:14pt; padding:10px 22px; border-radius:12px; min-height:40px;
+QPushButton#bigopen {{ font-size:13pt; padding:6px 18px; border-radius:10px; min-height:34px;
                        background:{MINT_GRADIENT}; color:{ON_ACCENT}; border:none; font-weight:700; }}
 QPushButton#bigopen:hover {{ background:{ACCENT_HI}; }}
-QPushButton#bighome {{ font-size:13pt; padding:10px 18px; border-radius:12px; min-height:40px; }}
+QPushButton#bighome {{ font-size:13pt; padding:10px 16px; border-radius:12px; min-height:40px;
+                       background:transparent; border:1px solid transparent; color:{MUTED}; }}
+QPushButton#bighome:hover {{ background:{PANEL2}; border:1px solid {LINE}; color:{TEXT}; }}
+QPushButton#bighome:pressed, QPushButton#bighome:checked {{ background:{ACCENT_SOFT}; color:{TEXT}; }}
+QPushButton#bighome::menu-indicator {{ width:0; }}
+#bar QLabel#pill {{ background:transparent; border:none; color:{MUTED}; padding:4px 6px; }}
 QLabel#filename {{ font-size:12.5pt; color:{TEXT}; background:transparent; padding:2px 4px; font-weight:600; }}
 """
 
@@ -818,8 +895,8 @@ class ViewerPage(QWidget):
         w = QWidget()
         v = QVBoxLayout(w)
         v.setContentsMargins(12, 8, 12, 12)
-        self.audio_name = QLabel(objectName="filename")
-        v.addWidget(self.audio_name)
+        self.audio_name = QLabel(objectName="filename", alignment=Qt.AlignCenter)
+        self.audio_name.setStyleSheet("font-size:20pt; font-weight:700;")
         v.addStretch(1)
         self.a_icon = QLabel("▶", objectName="big_icon", alignment=Qt.AlignCenter)
         self.a_time = QLabel("0:00", alignment=Qt.AlignCenter)
@@ -827,7 +904,9 @@ class ViewerPage(QWidget):
         self.a_bar = QSlider(Qt.Horizontal, enabled=False)
         self.a_bar.setFixedWidth(560)
         v.addWidget(self.a_icon, alignment=Qt.AlignCenter)
-        v.addSpacing(18)
+        v.addSpacing(22)
+        v.addWidget(self.audio_name, alignment=Qt.AlignCenter)
+        v.addSpacing(14)
         v.addWidget(self.a_bar, alignment=Qt.AlignCenter)
         v.addWidget(self.a_time)
         v.addStretch(1)
@@ -2056,18 +2135,18 @@ class CalibPage(QWidget):
 class ChoiceCard(QFrame):
     """A big clickable card: icon, title, one-line description, arrow."""
 
-    def __init__(self, icon, title, desc, on_click):
+    def __init__(self, kicker, title, desc, on_click):
         super().__init__(objectName="card")
         self.on_click = on_click
         self.setAttribute(Qt.WA_Hover)
         self.setCursor(Qt.PointingHandCursor)
         self.setMinimumHeight(140)
         h = QHBoxLayout(self)
-        h.setContentsMargins(26, 22, 26, 22)
+        h.setContentsMargins(28, 22, 28, 22)
         h.setSpacing(20)
-        h.addWidget(QLabel(icon, objectName="cardicon"), alignment=Qt.AlignTop)
         v = QVBoxLayout()
         v.setSpacing(6)
+        v.addWidget(QLabel(kicker.upper(), objectName="cardkicker"))
         v.addWidget(QLabel(title, objectName="cardtitle"))
         d = QLabel(desc, objectName="carddesc", wordWrap=True)
         v.addWidget(d)
@@ -2104,13 +2183,13 @@ class StartPage(QWidget):
         titles.addWidget(tag)
         header.addLayout(titles)
         header.addStretch(1)
-        self.strip = SignalStrip(170)
-        header.addWidget(self.strip, alignment=Qt.AlignVCenter)
+        self.strip = SignalStrip(big=True)
         self.conn_pill = QLabel(objectName="pill")
         self.conn_pill.setMinimumWidth(1)      # long stream names must never widen the window
         self.conn_pill.setMaximumWidth(460)
         header.addWidget(self.conn_pill, alignment=Qt.AlignVCenter)
         outer.addLayout(header)
+        outer.addWidget(self.strip)
 
         def step_header(n, text):
             h = QHBoxLayout()
@@ -2140,6 +2219,10 @@ class StartPage(QWidget):
         pv.addLayout(pr)
         self.profile_info = QLabel(objectName="hint", wordWrap=True)
         pv.addWidget(self.profile_info)
+        self.chips = QGridLayout()
+        self.chips.setHorizontalSpacing(8)
+        self.chips.setVerticalSpacing(8)
+        pv.addLayout(self.chips)
         pv.addStretch(1)
         row.addWidget(prof, 1)
 
@@ -2180,10 +2263,10 @@ class StartPage(QWidget):
         outer.addLayout(step_header(3, "Choose what to do"))
         choices = QHBoxLayout()
         choices.setSpacing(18)
-        choices.addWidget(ChoiceCard("∿", "Calibrate & test",
+        choices.addWidget(ChoiceCard("First, for each person", "Calibrate & test",
                                      "Guided calibration of every signal, a scored live test and live meters — "
                                      "saved to this person's profile.", lambda: self.main.go("calib")), 1)
-        choices.addWidget(ChoiceCard("▤", "Use the viewer",
+        choices.addWidget(ChoiceCard("Read · Listen · Watch", "Use the viewer",
                                      "Read PDFs, listen to audio and watch video hands-free, "
                                      "with this person's settings.", lambda: self.main.go("viewer")), 1)
         outer.addLayout(choices)
@@ -2210,12 +2293,26 @@ class StartPage(QWidget):
         if cal:
             counts = {v: sum(r["verdict"] == v for r in cal.values()) for v in ("Good", "OK", "Poor")}
             last = max(r.get("date", "") for r in cal.values())
-            good = list(dict.fromkeys(r["item"] for r in cal.values() if r["verdict"] == "Good"))
-            self.profile_info.setText(f"Last calibrated {last[:16].replace('T', ' ')} · "
-                                      f"{counts['Good']} Good, {counts['OK']} OK, {counts['Poor']} Poor"
-                                      + (f"<br>Works well: {', '.join(good)}" if good else ""))
+            self.profile_info.setText(f"Calibrated {last[:16].replace('T', ' ')} · "
+                                      f"{counts['Good']} good · {counts['OK']} ok · {counts['Poor']} poor"
+                                      f" — best signals:")
+            best = {}
+            for r in cal.values():  # one chip per item, its best score
+                if r["item"] not in best or r.get("accuracy", 0) > best[r["item"]].get("accuracy", 0):
+                    best[r["item"]] = r
+            ranked = sorted(best.values(), key=lambda r: -r.get("accuracy", 0))[:8]
         else:
             self.profile_info.setText("Not calibrated yet. Default settings are used until you calibrate.")
+            ranked = []
+        while self.chips.count():
+            w = self.chips.takeAt(0).widget()
+            if w:
+                w.deleteLater()
+        for i, r in enumerate(ranked):
+            c = QLabel(f"<span style='color:{VERDICT_COLOR.get(r['verdict'], MUTED)}'>●</span>&nbsp; {r['item']}"
+                       f"&nbsp; <b>{r.get('accuracy', 0) * 100:.0f}%</b>", objectName="chip")
+            c.setToolTip(f"{r['verdict']} — {r.get('kind', 'calibration')} on {r.get('date', '')[:10]}")
+            self.chips.addWidget(c, i // 2, i % 2)
         self.data_label.setText(f"Profiles and recordings are saved in Documents › {data_dir().name}")
         self.data_label.setToolTip(str(data_dir()))
         self.rb_fake.setChecked(bool(self.main.engine.status.get("fake")))
