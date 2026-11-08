@@ -22,7 +22,8 @@ RATE = 500
 CHANNELS = ["Fp1", "Fpz", "Fp2", "F7", "F3", "Fz", "F4", "F8", "M1", "T7", "C3", "Cz",
             "C4", "T8", "M2", "P7", "P3", "Pz", "P4", "P8", "POz", "O1", "Oz", "O2"]
 NAME = "FakeEego"
-ACTIONS = ("clench", "brow", "blink", "glance_left", "glance_right", "eyes_closed", "fist_right", "fist_left")
+ACTIONS = ("clench", "brow", "blink", "glance_left", "glance_right", "eyes_closed", "fist_right", "fist_left",
+           "eye_roll")
 INF = float("inf")
 
 
@@ -154,6 +155,14 @@ class FakeHeadset:
             data[:, self.f7] += 40 * sh["blink"] + 60 * sh["glance_left"] - 60 * sh["glance_right"]
             data[:, self.f8] += 40 * sh["blink"] - 60 * sh["glance_left"] + 60 * sh["glance_right"]
 
+            # eye roll: one full circle: eyes sweep left/right while going up and back down
+            for a, b in spans["eye_roll"]:
+                inside = (wall >= a) & (wall < b)
+                if inside.any():
+                    th = 2 * np.pi * (wall[inside] - a) / (b - a)
+                    data[inside, self.f7] += 70 * np.sin(th)
+                    data[inside, self.f8] -= 70 * np.sin(th)
+                    data[np.ix_(inside, self.fp)] += (60 * (1 - np.cos(th)) / 2)[:, None]
             self.outlet.push_chunk(data.astype(np.float32).tolist())
             n += chunk
             delay = start + n / RATE - local_clock()

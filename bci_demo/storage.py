@@ -53,6 +53,8 @@ DEFAULT_SETTINGS = {
     # viewer arrow rates: the best, well-spaced rates on the first real recording (wearer1, 92-100%)
     "viewer_rates": {"up": 13, "right": 9, "down": 15, "left": 11, "back": 9, "fwd": 13},
     "last_files": {},         # last PDF / audio / video opened, per kind
+    "action_input": "jaw",
+    "eyeroll_z": 8.0,         # experimental eye roll: left, right and up swings, in noise units    # viewer actions by "jaw" clench or "blink" (double blink / eyes closed)
 }
 
 _KNOWN = {"schema_version", "name", "created", "updated", "app_version", "settings", "calibration", "history"}

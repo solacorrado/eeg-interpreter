@@ -25,6 +25,7 @@ INPUTS = {  # key: (label, approx. calibration seconds)
     "glance": ("Glance left / right", 40),
     "eyes_closed": ("Eyes closed", 40),
     "fist": ("Fist squeeze, right / left", 64),
+    "eye_roll": ("Eye roll (experimental)", 45),
 }
 
 
@@ -75,6 +76,11 @@ def _trials(inp, ssvep_freqs=None):
                   Step(inp, "action", "closed", "Close your eyes. Open them at the beep.", 5,
                        [("eyes_closed", 4.3, 0.5)]))
                  for _ in range(4)]
+    elif inp == "eye_roll":
+        pairs = [(_rest(inp, "Look at the dot", 4),
+                  Step(inp, "action", "roll", "Roll your eyes in one full circle, then back to the dot", 3,
+                       [("eye_roll", 1.4, 0.5)]))
+                 for _ in range(6)]
     elif inp == "fist":
         pairs = [(_rest(inp, "Relax both hands", 4),
                   Step(inp, "action", side, f"Squeeze your {side.upper()} fist (keep squeezing)", 4,
@@ -128,11 +134,12 @@ TEST_ITEMS = {  # input -> list of (cls, text, seconds, fake actions, expected e
                      ("eyes_closed",), {})],
     "fist": [("right", "Squeeze your RIGHT fist", 5, [("fist_right", 4.2, 0.4)], ("fist_right",), {}),
              ("left", "Squeeze your LEFT fist", 5, [("fist_left", 4.2, 0.4)], ("fist_left",), {})],
+    "eye_roll": [("roll", "Roll your eyes in one full circle", 4, [("eye_roll", 1.4, 0.5)], ("eye_roll",), {})],
 }
 # events that belong to each input (so a blink during a "double blink" cue isn't a false alarm)
 FAMILY = {"ssvep": {"ssvep"}, "jaw": {"clench", "hold"}, "brow": {"brow"}, "blink": {"blink", "double_blink"},
           "glance": {"glance_left", "glance_right"}, "eyes_closed": {"eyes_closed"},
-          "fist": {"fist_right", "fist_left"}}
+          "fist": {"fist_right", "fist_left"}, "eye_roll": {"eye_roll"}}
 IGNORED_EVENTS = {"clench_start", "clench_end", "eyes_open"}
 
 
@@ -306,6 +313,25 @@ def analyze_calibration(rows, cues):
                 res["verdict"] = "OK"
             results.append(res)
 
+    if "eye_roll" in inputs:
+        # an eye roll swings the eyes both left AND right (F7-F8) and up (forehead) within ~2 s.
+        # Score per window = the smaller of: rightward swing, leftward swing, upward swing.
+        def roll_score(a, b):
+            h, v = _win(A, "heog", a, b), _win(A, "blink", a, b)
+            if not len(h) or not len(v):
+                return None
+            return min(np.max(h), -np.min(h), np.max(np.abs(v)))
+        acts = by("eye_roll", "action")
+        length = (acts[0]["t_end"] - acts[0]["t_start"]) + 0.6 if acts else 3.0
+        a = [x for c in acts if (x := roll_score(c["t_start"] + 0.2, c["t_end"] + 0.8)) is not None]
+        r = [x for c in by("eye_roll", "rest")
+             for w in _chop(c["t_start"] + 0.8, c["t_end"], min(length, c["t_end"] - c["t_start"] - 0.8))
+             if (x := roll_score(*w)) is not None]
+        sep = _separate(a, r, geometric=False)
+        s = {"eyeroll_z": round(_clamp(sep["thr"], 2.0, 500), 2)} if sep else {}
+        results.append(_result("eye_roll", "eye_roll", "Eye roll (experimental)", sep, s.get("eyeroll_z"),
+                               f"roll {sep['act']:.0f} vs rest {sep['rest']:.0f} (noise units)" if sep else "no data", s))
+
     if "ssvep" in inputs:
         # score the rates that were actually tested (all 10, or just the viewer's in a quick calibration)
         freqs = sorted({float(c["cls"]) for c in cues if c["input"] == "ssvep" and c["phase"] == "action"})
@@ -377,7 +403,8 @@ def score_test(events, cues):
         lat = f"{np.mean(d['lat']):.1f} s" if d["lat"] else "–"
         label = {"ssvep": f"Flicker {cls} Hz", "jaw": f"Jaw {'clench' if cls == 'once' else 'hold'}",
                  "brow": "Eyebrow raise", "blink": "Blink" if cls == "once" else "Double blink",
-                 "glance": f"Glance {cls}", "eyes_closed": "Eyes closed", "fist": f"Fist {cls}"}[inp]
+                 "glance": f"Glance {cls}", "eyes_closed": "Eyes closed", "fist": f"Fist {cls}",
+                 "eye_roll": "Eye roll (experimental)"}[inp]
         results.append({"key": f"test_{inp}_{cls}", "input": inp, "item": label, "accuracy": round(acc, 3),
                         "verdict": verdict(acc), "threshold": None,
                         "detail": f"{d['hits']}/{d['n']} detected, reaction {lat}, {d['wrong']} wrong-type",

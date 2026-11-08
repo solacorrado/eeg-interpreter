@@ -179,6 +179,7 @@ class Bridge(QObject):
 
 # =========================================================================== viewer pieces
 GLYPH = {"up": "▲", "right": "▶", "down": "▼", "left": "◀", "back": "◀◀ 15", "fwd": "15 ▶▶"}
+CAPTION = {"up": "Up", "down": "Down", "left": "Left", "right": "Right", "back": "Back", "fwd": "Forward"}
 # Defaults = the best, well-spaced rates on the first real recording (wearer1: 92-100% each).
 # Each profile can override them with settings["viewer_rates"].
 FREQ = {"up": 13.0, "right": 9.0, "down": 15.0, "left": 11.0, "back": 9.0, "fwd": 13.0}
@@ -238,6 +239,13 @@ class FlickerTarget(QWidget):
         p.setPen(arrow)
         p.setFont(QFont(FONT_DISPLAY, 34 if len(GLYPH[self.act]) == 1 else 21, QFont.Bold))
         p.drawText(r, Qt.AlignCenter, GLYPH[self.act])
+        p.setFont(QFont(FONT, 11, QFont.DemiBold))
+        p.setPen(QColor(255, 255, 255, 70 if self.off else 200))
+        if r.height() < 200:  # wide, short tile: word to the right of the arrow
+            p.drawText(QRectF(r.center().x() + 34, r.top(), 140, r.height()), Qt.AlignLeft | Qt.AlignVCenter,
+                       CAPTION[self.act])
+        else:
+            p.drawText(r.adjusted(0, 70, 0, 0), Qt.AlignHCenter | Qt.AlignVCenter, CAPTION[self.act])
         # small rate label in a pill at the bottom
         label = "off" if self.off else f"{self.freq:g} Hz"
         p.setFont(QFont(FONT, 8, QFont.DemiBold))
@@ -429,14 +437,31 @@ HELP = {
         ("😌", "Relax your face while reading", "Frowning or tensing hard can count as a clench."),
     ]),
     "audio": ("🎵  Listening", [
-        ("😬", "Clench your jaw twice, quickly", "Play or pause."),
-        ("😬", "Clench once", "Go back 15 seconds (it waits 1.5 s in case a second clench is coming)."),
+        ("😬", "Clench your jaw once", "Play or pause."),
+        ("⏱", "Hold a jaw clench for about 1 second", "Go back 15 seconds."),
         ("😌", "Relax your face between clenches", "Tensing hard can count as a clench."),
     ]),
     "video": ("🎬  Watching", [
         ("👀", "Look at the glowing ⏪ (left) or ⏩ (right) for 1–2 s", "Skips back or forward 15 seconds."),
         ("😬", "Clench your jaw once", "Play or pause."),
-        ("😌", "Relax your face between clenches", "Tensing hard can count as a clench."),
+        ("⏱", "Hold a jaw clench for about 1 second", "Go back 15 seconds."),
+    ]),
+}
+HELP_BLINK = {
+    "pdf": ("📄  Reading a PDF", [
+        ("👀", "Look at a glowing arrow for 1–2 seconds", "The page scrolls that way. Past the edge, it turns the page."),
+        ("😉", "Blink twice, quickly", "Turns the arrows off (read without flicker) — or back on."),
+        ("😌", "Close your eyes for about 1 second", "Zooms in. Do it again to zoom out."),
+        ("ℹ", "Normal blinking is fine", "Only two quick, deliberate blinks count (natural double blinks can occasionally trigger it)."),
+    ]),
+    "audio": ("🎵  Listening", [
+        ("😉", "Blink twice, quickly", "Play or pause."),
+        ("😌", "Close your eyes for about 1 second", "Go back 15 seconds."),
+    ]),
+    "video": ("🎬  Watching", [
+        ("👀", "Look at the glowing ⏪ (left) or ⏩ (right) for 1–2 s", "Skips back or forward 15 seconds."),
+        ("😉", "Blink twice, quickly", "Play or pause."),
+        ("😌", "Close your eyes for about 1 second", "Go back 15 seconds."),
     ]),
 }
 HELP_COMMON = [
@@ -501,9 +526,9 @@ class HelpOverlay(QFrame):
         h.addLayout(v, 1)
         self.lay.addLayout(h)
 
-    def set_tab(self, tab):
+    def set_tab(self, tab, mode="jaw"):
         self._clear()
-        title, rows = HELP[tab]
+        title, rows = (HELP_BLINK if mode == "blink" else HELP)[tab]
         self.lay.addWidget(QLabel(f"How to use — {title}", objectName="helptitle"))
         for r in rows:
             self._row(*r)
@@ -586,8 +611,20 @@ class ViewerPage(QWidget):
         # ---- flicker comfort settings live in the gear menu (out of the way, more room for content)
         settings = QWidget()
         settings.setStyleSheet(f"background:{PANEL2};")
-        fl = QHBoxLayout(settings)
-        fl.setContentsMargins(14, 10, 14, 10)
+        sv = QVBoxLayout(settings)
+        sv.setContentsMargins(14, 10, 14, 10)
+        sv.setSpacing(10)
+        al = QHBoxLayout()
+        al.addWidget(QLabel("Action input"))
+        self.mode_box = QComboBox()
+        self.mode_box.addItems(["Jaw clench", "Blinks"])
+        self.mode_box.setToolTip("Blinks: double blink = the main action, close eyes ~1 s = the 'hold' action")
+        self.mode_box.setFocusPolicy(Qt.NoFocus)
+        self.mode_box.currentIndexChanged.connect(lambda i: self.set_mode(["jaw", "blink"][i]))
+        al.addWidget(self.mode_box, 1)
+        sv.addLayout(al)
+        fl = QHBoxLayout()
+        sv.addLayout(fl)
         self.hint = QLabel(objectName="hint")  # (instructions now live in the How-to-use card)
         fl.addWidget(QLabel("Flicker strength"))
         self.slider = QSlider(Qt.Horizontal, minimum=10, maximum=100, singleStep=5, pageStep=10)
@@ -618,6 +655,7 @@ class ViewerPage(QWidget):
         self.help = HelpOverlay(self)
         self.help.hide()
         self.help_shown_once = False
+        self.mode = "jaw"
 
         self.toast_label = QLabel(self, objectName="toast")
         self.toast_label.hide()
@@ -651,23 +689,26 @@ class ViewerPage(QWidget):
         g.setSpacing(8)
         self.pdf = PdfView(pdf_path)
 
-        def centered(tile):  # compact up/down tiles, centred, instead of full-width bars
-            tile.setFixedSize(460, 104)
+        # ◀ / ▶ tall side tiles (the video's size); ▲ / ▼ wide tiles on top and bottom
+        def wide(tile):
+            tile.setFixedHeight(140)
+            tile.setMinimumWidth(420)
+            tile.setMaximumWidth(700)
             box = QWidget()
             h = QHBoxLayout(box)
             h.setContentsMargins(0, 0, 0, 0)
             h.addStretch(1)
-            h.addWidget(tile)
+            h.addWidget(tile, 4)
             h.addStretch(1)
             return box
 
-        g.addWidget(centered(self.targets["up"]), 0, 1)
+        for t in ("left", "right"):
+            self.targets[t].setFixedWidth(160)
+        g.addWidget(wide(self.targets["up"]), 0, 1)
         g.addWidget(self.targets["left"], 1, 0)
         g.addWidget(self.pdf, 1, 1)
         g.addWidget(self.targets["right"], 1, 2)
-        g.addWidget(centered(self.targets["down"]), 2, 1)
-        for t in ("left", "right"):
-            self.targets[t].setFixedWidth(150)
+        g.addWidget(wide(self.targets["down"]), 2, 1)
         g.setRowStretch(1, 1)
         g.setColumnStretch(1, 1)
         v.addLayout(g, 1)
@@ -802,9 +843,24 @@ class ViewerPage(QWidget):
                 self.targets[act].freq = float(f)
                 self.targets[act].update()
 
+    def set_mode(self, mode, announce=True):
+        """Action input: 'jaw' (clench) or 'blink' (double blink + eyes closed ~1 s)."""
+        self.mode = mode
+        self.main.profile.settings["action_input"] = mode
+        # only detect what this mode uses, so other detectors can't steal or invent events
+        self.main.engine.set_inputs({"ssvep", "jaw"} if mode == "jaw" else {"ssvep", "blink", "eyes_closed"})
+        self.mode_box.blockSignals(True)
+        self.mode_box.setCurrentIndex(0 if mode == "jaw" else 1)
+        self.mode_box.blockSignals(False)
+        if self.help.isVisible():
+            self.help.set_tab(self.tab, mode)
+        if announce:
+            self.toast("Action input: jaw clench" if mode == "jaw" else
+                       "Action input: blinks (double blink · close eyes 1 s)")
+
     def activate(self):
         s = self.main.profile.settings
-        self.main.engine.set_inputs({"jaw", "ssvep"})  # the viewer only uses flicker + jaw
+        self.set_mode(s.get("action_input", "jaw"), announce=False)
         self.apply_rates()
         for kind, path in (s.get("last_files") or {}).items():
             if path and Path(path).exists() and path != self.files.get(kind):
@@ -823,7 +879,7 @@ class ViewerPage(QWidget):
             self.show_help(True)
 
     def show_help(self, on):
-        self.help.set_tab(self.tab)
+        self.help.set_tab(self.tab, self.mode)
         self.help.setGeometry(self.rect())
         self.help.setVisible(on)
         if on:
@@ -850,8 +906,7 @@ class ViewerPage(QWidget):
     def toast(self, msg):
         self.toast_label.setText(msg)
         self.toast_label.adjustSize()
-        self.toast_label.move((self.width() - self.toast_label.width()) // 2,
-                              self.height() - self.toast_label.height() - 120)
+        self.toast_label.move((self.width() - self.toast_label.width()) // 2, self.stack.y() + 14)
         self.toast_label.show()
         self.toast_label.raise_()
         self.toast_timer.start(1500)
@@ -881,10 +936,12 @@ class ViewerPage(QWidget):
             self.video.pause()
         self.hint.setText({
             "pdf": "Look at a glowing arrow to scroll · jaw: clench twice = arrows on/off, hold 1 s = zoom",
-            "audio": "Jaw: clench twice = play / pause · clench once = back 15 s",
-            "video": "Look at a glowing arrow to skip 15 s · jaw: clench = play / pause"}[name])
+            "audio": "Jaw: clench once = play / pause · hold 1 s = back 15 s",
+            "video": "Look at a glowing arrow to skip 15 s · jaw: clench = play / pause, hold = back 15 s"}[name])
+        if self.mode == "blink":
+            self.hint.setText("Blinks: blink twice = main action · close eyes ~1 s = hold action")
         if self.help.isVisible():
-            self.help.set_tab(name)
+            self.help.set_tab(name, self.mode)
         self.send_targets()
 
     def audio_progress(self, pos):
@@ -951,22 +1008,40 @@ class ViewerPage(QWidget):
                 self.set_arrows(not self.pdf.arrows_on)
             else:
                 self.toast("Clench again to turn arrows " + ("off" if self.pdf.arrows_on else "on"))
-        elif self.tab == "audio":
-            self.single_timer.stop()
-            if is_double:
-                self.toast(f"Double clench → {self.toggle(self.audio)}")
-            else:
-                self.toast("Back 15 s… (clench again now to play/pause instead)")
-                self.single_timer.start(DOUBLE_MS)
+        elif self.tab == "audio":  # one clench = play / pause
+            self.toast(f"Clench → {self.toggle(self.audio)}")
         else:
             self.toast(f"Clench → {self.toggle(self.video)}")
+
+    def blink_action(self):
+        """Blink mode, double blink = the main action (what one clench / a double clench does)."""
+        if self.tab == "pdf":
+            self.set_arrows(not self.pdf.arrows_on)
+        elif self.tab == "audio":
+            self.toast(f"Double blink → {self.toggle(self.audio)}")
+        else:
+            self.toast(f"Double blink → {self.toggle(self.video)}")
+
+    def blink_hold(self):
+        """Blink mode, eyes closed ~1 s = the 'hold' action."""
+        if self.tab == "pdf":
+            self.toast("Eyes closed → zoom in" if self.pdf.toggle_zoom() else "Eyes closed → zoom out")
+        elif self.tab == "audio":
+            self.audio_back()
+        else:
+            self.skip(self.video, -15000)
+            self.toast("Eyes closed → back 15 s")
 
     def hold(self):
         self.last_clench = 0.0
         if self.tab == "pdf":
             self.toast("Held clench → zoom in" if self.pdf.toggle_zoom() else "Held clench → zoom out")
+        elif self.tab == "audio":
+            self.skip(self.audio, -15000)
+            self.toast("Held clench → back 15 s")
         else:
-            self.clench()
+            self.skip(self.video, -15000)
+            self.toast("Held clench → back 15 s")
 
     def on_event(self, m):
         t = m["type"]
@@ -974,10 +1049,14 @@ class ViewerPage(QWidget):
             self.status.setText(status_html(m, compact=True))
         elif not self.isVisible():
             return
-        elif t == "clench":
+        elif t == "clench" and self.mode == "jaw":
             self.clench()
-        elif t == "hold":
+        elif t == "hold" and self.mode == "jaw":
             self.hold()
+        elif t == "double_blink" and self.mode == "blink":
+            self.blink_action()
+        elif t == "eyes_closed" and self.mode == "blink":
+            self.blink_hold()
         elif t == "ssvep":
             for a in TAB_ACTS[self.tab]:
                 if FREQ[a] == m["freq"]:
@@ -1218,7 +1297,7 @@ class MeterPanel(QWidget):
 EVENT_TILES = [("clench", "Jaw clench"), ("hold", "Jaw hold"), ("brow", "Eyebrows"), ("blink", "Blink"),
                ("double_blink", "Double blink"), ("glance_left", "Glance ←"), ("glance_right", "Glance →"),
                ("eyes_closed", "Eyes closed"), ("fist_right", "Right fist"), ("fist_left", "Left fist")] + \
-              [(f"ssvep_{f:g}", f"Flicker {f:g}") for f in C.SSVEP_FREQS]
+              [("eye_roll", "Eye roll (exp.)")] + [(f"ssvep_{f:g}", f"Flicker {f:g}") for f in C.SSVEP_FREQS]
 
 
 class EventTiles(QWidget):
@@ -1309,7 +1388,7 @@ class CalibPage(QWidget):
         self.checks = {}
         for key, (label, secs) in C.INPUTS.items():
             cb = QCheckBox(f"{label}   ~{secs} s")
-            cb.setChecked(True)
+            cb.setChecked(key != "eye_roll")  # experimental: only when asked for
             cb.setFocusPolicy(Qt.NoFocus)
             cb.toggled.connect(self.update_total)
             self.checks[key] = cb
@@ -1322,11 +1401,15 @@ class CalibPage(QWidget):
                                   "in that order (about 4 min with the voice)")
         self.btn_quick.clicked.connect(self.start_quick)
         self.btn_cal = QPushButton("Full calibration (ticked inputs)")
+        self.btn_roll = QPushButton("👁  Eye roll calibration (experimental)")
+        self.btn_roll.setToolTip("Calibrates only the experimental eye-roll input (~1 min). "
+                                 "It isn't used by the viewer yet.")
+        self.btn_roll.clicked.connect(self.start_roll)
         self.btn_redo = QPushButton("Redo Poor inputs only")
         self.btn_redo.setToolTip("Tick only the inputs whose latest calibration had a Poor result, then calibrate them")
         self.btn_test = QPushButton("Run live test")
         self.btn_stop = QPushButton("Stop")
-        for b in (self.btn_quick, self.btn_cal, self.btn_redo, self.btn_test, self.btn_stop):
+        for b in (self.btn_quick, self.btn_cal, self.btn_roll, self.btn_redo, self.btn_test, self.btn_stop):
             b.setFocusPolicy(Qt.NoFocus)
             lv.addWidget(b)
         self.btn_cal.clicked.connect(lambda: self.start_session("calibration"))
@@ -1447,6 +1530,7 @@ class CalibPage(QWidget):
         self.btn_test.setEnabled(bool(inputs) and not self.rec)
         self.btn_redo.setEnabled(bool(self.poor_inputs()) and not self.rec)
         self.btn_quick.setEnabled(not self.rec)
+        self.btn_roll.setEnabled(not self.rec)
 
     def poor_inputs(self):
         """Inputs whose most recent CALIBRATION had any Poor item."""
@@ -1473,6 +1557,12 @@ class CalibPage(QWidget):
     def viewer_rates(self):
         return sorted({float(f) for f in self.main.profile.settings.get("viewer_rates", {}).values()})
 
+    def start_roll(self):
+        """Experimental: calibrate only the eye roll."""
+        for k, cb in self.checks.items():
+            cb.setChecked(k == "eye_roll")
+        self.start_session("calibration")
+
     def start_quick(self):
         """Only what the viewer uses: its flicker rates, then blinks, then jaw, in that order."""
         for k, cb in self.checks.items():
@@ -1496,8 +1586,8 @@ class CalibPage(QWidget):
         eng.set_recorder(self.rec)
         self.i, self.cur_t0, self.elapsed_before = -1, None, 0.0
         self.voice_warning = ""
-        for b, on in ((self.btn_quick, False), (self.btn_cal, False), (self.btn_redo, False), (self.btn_test, False),
-                      (self.btn_stop, True)):
+        for b, on in ((self.btn_quick, False), (self.btn_cal, False), (self.btn_roll, False), (self.btn_redo, False),
+                      (self.btn_test, False), (self.btn_stop, True)):
             b.setEnabled(on)
         for cb in self.checks.values():
             cb.setEnabled(False)

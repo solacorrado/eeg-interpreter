@@ -36,6 +36,7 @@ class Gestures:
         self.eyes_closed, self.eyes_since, self.open_since = False, None, None
         self.fist = {"right": {"latched": False, "since": None}, "left": {"latched": False, "since": None}}
         self.ss_hist, self.ss_block = [], -1e9
+        self.roll_buf, self.roll_block = [], -1e9
 
     def apply(self, settings):
         self.s = dict(settings)
@@ -52,7 +53,25 @@ class Gestures:
         ev += self._glance(row, t)
         ev += self._eyes(row, t)
         ev += self._fists(row, t)
+        ev += self._eye_roll(row, t)
         return ev
+
+    def _eye_roll(self, row, t):
+        """Experimental: eyes swing left AND right (F7-F8) and up (forehead) within 2 s."""
+        if not self.on("eye_roll"):
+            return []
+        self.roll_buf.append((t, row["heog"], row["blink"]))
+        while self.roll_buf and self.roll_buf[0][0] < t - 2.0:
+            self.roll_buf.pop(0)
+        if t < self.roll_block or len(self.roll_buf) < 10:
+            return []
+        hs = [h for _, h, _ in self.roll_buf]
+        vs = [abs(v) for _, _, v in self.roll_buf]
+        thr = self.s.get("eyeroll_z", 8.0)
+        if max(hs) >= thr and -min(hs) >= thr and max(vs) >= thr:
+            self.roll_buf, self.roll_block = [], t + 2.5
+            return [{"type": "eye_roll", "t": t}]
+        return []
 
     def _emg(self, row, t):
         s, ev = self.s, []
