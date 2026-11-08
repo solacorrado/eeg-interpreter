@@ -74,7 +74,7 @@ Needs [uv](https://docs.astral.sh/uv/) (it installs Python 3.13 and all librarie
 **Install before going to the headset station.** The ANT network may have no internet.
 
 ```bash
-git clone git@github.com:solacorrado/eeg-interpreter.git
+git clone https://github.com/solacorrado/eeg-interpreter.git
 cd eeg-interpreter
 uv sync                                   # install libraries
 uv run python bci_demo/make_media.py      # make the sample PDF, audio and video

@@ -13,3 +13,6 @@ bci_demo/static/media/
 *.vmrk
 *.eeg
 *.fif
+
+# ...but publish the raw eego recordings in recordings/
+!recordings/**/*.cnt
