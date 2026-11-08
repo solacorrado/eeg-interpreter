@@ -22,6 +22,7 @@ import random
 import sys
 import time
 import wave
+from collections import deque
 from pathlib import Path
 
 import numpy as np
@@ -51,38 +52,43 @@ from storage import Profile, TrialRecorder, data_dir, list_profiles, load_state,
 from version import APP_VERSION
 
 HERE = Path(__file__).parent
-BG, PANEL, PANEL2, LINE, TEXT, MUTED = "#0b0f16", "#121923", "#18212d", "#243041", "#eef2f8", "#8a97ab"
-ACCENT, WARN, BAD, ARROW = "#34d399", "#fbbf24", "#f87171", "#ff5a52"
-ACCENT_SOFT = "#123327"
-FONT, FONT_DISPLAY = "Segoe UI Variable Text", "Segoe UI Variable Display"
-VERDICT_COLOR = {"Good": ACCENT, "OK": WARN, "Poor": BAD}
+# Design tokens: a calm graphite instrument panel with one signal-blue accent. The flicker targets
+# stay white glows with red arrows (they must be the brightest, most salient things on screen).
+BG, PANEL, PANEL2, LINE, TEXT, MUTED = "#0f1013", "#16181d", "#1d2027", "#2a2e37", "#edeff4", "#969caa"
+ACCENT, WARN, BAD, ARROW = "#7cc4ff", "#ffb454", "#ff6b6b", "#ff5a52"
+GOOD = "#5bd69b"
+ACCENT_SOFT, ACCENT_HI, ON_ACCENT = "#142636", "#a3d6ff", "#08131d"
+# Atkinson Hyperlegible: made by the Braille Institute for low-vision readers. IBM Plex Mono: readouts.
+FONT, FONT_DISPLAY, MONO = "Atkinson Hyperlegible", "Atkinson Hyperlegible", "IBM Plex Mono"
+VERDICT_COLOR = {"Good": GOOD, "OK": WARN, "Poor": BAD}
 GLOW_STOPS = [(0.0, 1.0), (0.35, 0.95), (0.6, 0.65), (0.8, 0.3), (1.0, 0.0)]  # soft edge, wide bright core
-MINT_GRADIENT = "qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #3ee6a3, stop:1 #22c3b5)"
+MINT_GRADIENT = ACCENT  # (solid accent fill; no gradients)
 
 STYLE = f"""
 QWidget {{ background:{BG}; color:{TEXT}; font-family:"{FONT}", "Segoe UI"; font-size:10.5pt; }}
+QPushButton#primary, QPushButton#bigopen {{ letter-spacing:0.2px; }}
 QToolTip {{ background:{PANEL2}; color:{TEXT}; border:1px solid {LINE}; padding:6px 8px; }}
 #bar {{ background:{PANEL}; border-bottom:1px solid {LINE}; }}
 #bar QLabel, #bar QSlider {{ background:transparent; }}
-#panel {{ background:{PANEL}; border:1px solid {LINE}; border-radius:16px; }}
+#panel {{ background:{PANEL}; border:1px solid {LINE}; border-radius:14px; }}
 #panel QLabel, #panel QCheckBox, #panel QRadioButton {{ background:transparent; }}
-QPushButton {{ background:{PANEL2}; border:1px solid {LINE}; color:{TEXT}; padding:8px 16px; border-radius:10px; }}
-QPushButton:hover {{ background:#1f2a39; border-color:#34445c; }}
-QPushButton:pressed {{ background:#0f151e; }}
-QPushButton:checked {{ background:{ACCENT_SOFT}; border-color:{ACCENT}; color:#d6fbe8; }}
-QPushButton:disabled {{ color:#4d5767; background:#10161f; border-color:#1b2330; }}
-QPushButton#primary {{ background:{MINT_GRADIENT}; color:#06140f; border:none; font-weight:700; padding:10px 18px; }}
-QPushButton#primary:hover {{ background:qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #5af0b4, stop:1 #38d4c6); }}
-QPushButton#primary:pressed {{ background:#24b88a; }}
-QPushButton#primary:disabled {{ background:#18291f; color:#4f6b60; }}
+QPushButton {{ background:{PANEL2}; border:1px solid {LINE}; color:{TEXT}; padding:8px 16px; border-radius:8px; }}
+QPushButton:hover {{ background:#23262e; border-color:#3a4150; }}
+QPushButton:pressed {{ background:#111317; }}
+QPushButton:checked {{ background:{ACCENT_SOFT}; border-color:{ACCENT}; color:#dcefff; }}
+QPushButton:disabled {{ color:#4e5360; background:#121418; border-color:#1e2128; }}
+QPushButton#primary {{ background:{MINT_GRADIENT}; color:{ON_ACCENT}; border:none; font-weight:700; padding:10px 18px; }}
+QPushButton#primary:hover {{ background:{ACCENT_HI}; }}
+QPushButton#primary:pressed {{ background:#5fb0ee; }}
+QPushButton#primary:disabled {{ background:#18232d; color:#4f5d6b; }}
 QComboBox {{ background:{PANEL2}; border:1px solid {LINE}; border-radius:10px; padding:7px 12px; }}
-QComboBox:hover {{ border-color:#34445c; }}
+QComboBox:hover {{ border-color:#3a4150; }}
 QComboBox::drop-down {{ border:none; width:26px; }}
 QComboBox QAbstractItemView {{ background:{PANEL2}; border:1px solid {LINE}; selection-background-color:{ACCENT_SOFT};
                                selection-color:{TEXT}; outline:none; padding:4px; }}
 QSlider::groove:horizontal {{ height:6px; background:{PANEL2}; border-radius:3px; }}
 QSlider::sub-page:horizontal {{ background:{MINT_GRADIENT}; border-radius:3px; }}
-QSlider::handle:horizontal {{ background:#eafff5; border:2px solid {ACCENT}; width:14px; margin:-6px 0; border-radius:9px; }}
+QSlider::handle:horizontal {{ background:#eaf5ff; border:2px solid {ACCENT}; width:14px; margin:-6px 0; border-radius:9px; }}
 QProgressBar {{ background:{PANEL2}; border:none; border-radius:4px; max-height:8px; text-align:center; }}
 QProgressBar::chunk {{ background:{MINT_GRADIENT}; border-radius:4px; }}
 QTabWidget::pane {{ border:1px solid {LINE}; border-radius:14px; background:{PANEL}; top:-1px; }}
@@ -94,17 +100,17 @@ QTableWidget {{ background:{PANEL}; alternate-background-color:{PANEL2}; gridlin
 QHeaderView::section {{ background:{PANEL}; color:{MUTED}; border:none; border-bottom:1px solid {LINE}; padding:6px;
                         font-weight:600; }}
 QScrollBar:vertical {{ background:transparent; width:10px; margin:2px; }}
-QScrollBar::handle:vertical {{ background:#2b3748; border-radius:4px; min-height:30px; }}
+QScrollBar::handle:vertical {{ background:#2e323b; border-radius:4px; min-height:30px; }}
 QScrollBar::add-line, QScrollBar::sub-line {{ height:0; width:0; }}
 QCheckBox {{ spacing:10px; }}
 QRadioButton {{ spacing:10px; }}
-QCheckBox::indicator, QRadioButton::indicator {{ width:16px; height:16px; border:1.5px solid #4a5870; background:{BG}; }}
+QCheckBox::indicator, QRadioButton::indicator {{ width:16px; height:16px; border:1.5px solid #4a505d; background:{BG}; }}
 QCheckBox::indicator {{ border-radius:5px; }}
 QRadioButton::indicator {{ border-radius:9px; }}
 QCheckBox::indicator:checked, QRadioButton::indicator:checked {{ background:{ACCENT}; border-color:{ACCENT}; }}
 QCheckBox::indicator:hover, QRadioButton::indicator:hover {{ border-color:{ACCENT}; }}
 QCheckBox::indicator:disabled {{ border-color:{LINE}; }}
-#toast {{ background:rgba(18, 25, 35, 240); border:1px solid {ACCENT}; border-radius:14px; padding:10px 22px;
+#toast {{ background:rgba(22, 24, 29, 240); border:1px solid {ACCENT}; border-radius:14px; padding:10px 22px;
           font-size:13pt; color:{TEXT}; }}
 #big_icon {{ font-size:54pt; color:{ACCENT}; background:{ACCENT_SOFT}; border:2px solid {ACCENT};
              border-radius:90px; min-width:180px; max-width:180px; min-height:180px; max-height:180px; }}
@@ -113,12 +119,14 @@ QCheckBox::indicator:disabled {{ border-color:{LINE}; }}
 #h2 {{ font-family:"{FONT_DISPLAY}", "Segoe UI"; font-size:13pt; font-weight:600; background:transparent; }}
 #panel #badge, #badge {{ background:{ACCENT_SOFT}; color:{ACCENT}; border-radius:14px; font-weight:700; font-size:11pt;
           min-width:28px; max-width:28px; min-height:28px; max-height:28px; }}
-#bar #pill, #pill {{ background:{PANEL2}; border:1px solid {LINE}; border-radius:14px; padding:5px 14px; }}
-#card {{ background:{PANEL}; border:1px solid {LINE}; border-radius:20px; }}
-#card:hover {{ border:1px solid {ACCENT}; background:#14202c; }}
+#bar #pill, #pill {{ background:{PANEL2}; border:1px solid {LINE}; border-radius:14px; padding:5px 14px;
+          font-family:"{MONO}", "Cascadia Mono", monospace; font-size:9.5pt; }}
+#card {{ background:{PANEL}; border:1px solid {LINE}; border-radius:14px; }}
+#card:hover {{ border:1px solid {ACCENT}; background:#182330; }}
 #card QLabel {{ background:transparent; }}
 #cardtitle {{ font-family:"{FONT_DISPLAY}", "Segoe UI"; font-size:17pt; font-weight:700; }}
-#cardicon {{ font-size:30pt; }}
+#cardicon {{ font-size:22pt; color:{ACCENT}; border:1.5px solid {ACCENT}; border-radius:28px;
+              min-width:56px; max-width:56px; min-height:56px; max-height:56px; qproperty-alignment:AlignCenter; }}
 #carddesc {{ color:{MUTED}; font-size:11pt; }}
 #cardarrow {{ color:{ACCENT}; font-size:20pt; font-weight:700; }}
 """
@@ -160,15 +168,64 @@ def status_html(m, compact=False):
     if compact:
         calib = " · <b>settling…</b>" if m.get("calibrating") else ""
         jaw = f.get("jaw")
-        jaw_txt = (f" &nbsp;·&nbsp; jaw <b style='color:{WARN if m.get('clenching') else TEXT}'>{jaw:.1f}×</b>"
+        jaw_txt = (f" · jaw <b style='color:{WARN if m.get('clenching') else TEXT}'>{jaw:.1f}×</b>"
                    if jaw is not None else "")
-        return (f"<span style='color:{ACCENT}'>●</span>&nbsp; {short_stream(m['stream'])}"
-                f"{' · practice' if m.get('fake') else ''}{calib}{jaw_txt}")
+        name = short_stream(m["stream"])
+        name = name if len(name) <= 14 else name[:13] + "…"
+        return (f"<span style='color:{GOOD}'>●</span> {name}{' (sim)' if m.get('fake') else ''}{calib}{jaw_txt}")
     jaw = f.get("jaw")
     jaw_txt = f"   jaw <b style='color:{WARN if m.get('clenching') else TEXT}'>{jaw:.1f}×</b>" if jaw is not None else ""
     scores = "  ".join(f"{k} Hz {v:.2f}" for k, v in m.get("scores", {}).items())
-    return (f"<span style='color:{ACCENT}'>●</span> {short_stream(m['stream'])}{' (practice)' if m.get('fake') else ''}{calib}"
+    return (f"<span style='color:{GOOD}'>●</span> {short_stream(m['stream'])}{' (practice)' if m.get('fake') else ''}{calib}"
             f"   <span style='color:{MUTED}'>{scores}</span>{jaw_txt}")
+
+
+class SignalStrip(QWidget):
+    """A small live trace of the jaw-muscle signal from the headset: it moves whenever data is
+    arriving (and jumps on a clench), so anyone can see at a glance that the EEG is live."""
+
+    def __init__(self, width=150):
+        super().__init__()
+        self.setFixedSize(width, 34)
+        self.vals = deque(maxlen=60)  # 6 s at 10 updates a second
+        self.live, self.clenching = False, False
+        self.setToolTip("Live signal from the headset (jaw muscle). It moves when data is arriving.")
+
+    def push(self, m):
+        if m.get("type") != "status":
+            return
+        self.live = bool(m.get("connected")) and not m.get("stalled")
+        self.clenching = bool(m.get("clenching"))
+        jaw = (m.get("features") or {}).get("jaw")
+        if self.live and jaw:
+            self.vals.append(math.log10(max(0.3, min(jaw, 300.0))))
+        elif not self.live:
+            self.vals.clear()
+        self.update()
+
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        r = QRectF(self.rect()).adjusted(1, 1, -1, -1)
+        p.setPen(QPen(QColor(LINE), 1))
+        p.setBrush(QColor(PANEL2))
+        p.drawRoundedRect(r, 10, 10)
+        inner = r.adjusted(10, 7, -10, -7)
+        if not self.live or len(self.vals) < 2:
+            p.setPen(QPen(QColor(MUTED), 1, Qt.DashLine))
+            p.drawLine(QPointF(inner.left(), inner.center().y()), QPointF(inner.right(), inner.center().y()))
+            return
+        lo, hi = math.log10(0.3), math.log10(300.0)
+        n = self.vals.maxlen
+        pts = [QPointF(inner.left() + inner.width() * (i + n - len(self.vals)) / (n - 1),
+                       inner.bottom() - inner.height() * (v - lo) / (hi - lo)) for i, v in enumerate(self.vals)]
+        pen = QPen(QColor(WARN if self.clenching else ACCENT), 1.6)
+        pen.setJoinStyle(Qt.RoundJoin)
+        p.setPen(pen)
+        p.drawPolyline(QPolygonF(pts))
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(WARN if self.clenching else ACCENT))
+        p.drawEllipse(pts[-1], 2.6, 2.6)
 
 
 class Bridge(QObject):
@@ -214,7 +271,7 @@ class FlickerTarget(QWidget):
         r = QRectF(self.rect()).adjusted(3, 3, -3, -3)
         now = time.perf_counter()
         level = flicker_level(self.freq, now)
-        bg = QColor("#0d131c")
+        bg = QColor("#0c0d10")
         if not self.off and Flicker.style == "box":
             v = int(255 * level)
             bg = QColor(v, v, v)
@@ -233,7 +290,7 @@ class FlickerTarget(QWidget):
             p.restore()
         if now < self.hit_until:  # selected: mint outline and tint
             p.setPen(QPen(QColor(ACCENT), 3))
-            p.setBrush(QColor(52, 211, 153, 40))
+            p.setBrush(QColor(124, 196, 255, 40))
             p.drawRoundedRect(r, 18, 18)
         arrow = QColor(ARROW)
         arrow.setAlphaF(0.25 if self.off else 1.0)
@@ -249,7 +306,7 @@ class FlickerTarget(QWidget):
             p.drawText(r.adjusted(0, 70, 0, 0), Qt.AlignHCenter | Qt.AlignVCenter, CAPTION[self.act])
         # small rate label in a pill at the bottom
         label = "off" if self.off else f"{self.freq:g} Hz"
-        p.setFont(QFont(FONT, 8, QFont.DemiBold))
+        p.setFont(QFont(MONO, 8, QFont.Medium))
         w = p.fontMetrics().horizontalAdvance(label) + 16
         pill = QRectF(r.center().x() - w / 2, r.bottom() - 26, w, 18)
         p.setPen(Qt.NoPen)
@@ -356,7 +413,7 @@ class PdfView(QWidget):
         p.setRenderHint(QPainter.Antialiasing)
         p.setRenderHint(QPainter.SmoothPixmapTransform)
         p.setPen(Qt.NoPen)
-        p.setBrush(QColor("#151d29"))
+        p.setBrush(QColor("#17191e"))
         p.drawRoundedRect(QRectF(self.rect()), 16, 16)
         x, y, s = self.shown
         if s <= 0:
@@ -375,12 +432,12 @@ class PdfView(QWidget):
         p.drawImage(page, img)
         p.restore()
         name = self.name if len(self.name) <= 32 else self.name[:29] + "…"
-        info = (f"📄 {name}  ·  page {self.page + 1} / {self.pages}  ·  {'fit' if self.zoom == 1 else f'{self.zoom:g}×'}"
+        info = (f"{name}  ·  page {self.page + 1}/{self.pages}  ·  {'fit' if self.zoom == 1 else f'{self.zoom:g}×'}"
                 f"  ·  arrows {'on' if self.arrows_on else 'off'}")
-        p.setFont(QFont(FONT, 9.5, QFont.DemiBold))
+        p.setFont(QFont(MONO, 9, QFont.Medium))
         w = p.fontMetrics().horizontalAdvance(info) + 24
         box = QRectF(self.width() - w - M - 8, self.height() - M - 36, w, 26)
-        p.setBrush(QColor(11, 15, 22, 215))
+        p.setBrush(QColor(15, 16, 19, 220))
         p.drawRoundedRect(box, 13, 13)
         p.setPen(QColor(TEXT))
         p.drawText(box, Qt.AlignCenter, info)
@@ -411,15 +468,15 @@ VIEWER_STYLE = f"""
 #segment {{ background:{PANEL2}; border:1px solid {LINE}; border-radius:14px; }}
 QPushButton#seg {{ background:transparent; border:1px solid transparent; font-size:14pt; padding:8px 22px;
                    border-radius:10px; min-height:40px; color:{MUTED}; }}
-QPushButton#seg:hover {{ color:{TEXT}; background:#1f2a39; }}
-QPushButton#seg:checked {{ background:{ACCENT_SOFT}; border:1px solid {ACCENT}; color:#d6fbe8; }}
+QPushButton#seg:hover {{ color:{TEXT}; background:#23262e; }}
+QPushButton#seg:checked {{ background:{ACCENT_SOFT}; border:1px solid {ACCENT}; color:#dcefff; }}
 QPushButton#bigctl {{ font-size:13.5pt; padding:8px 16px; border-radius:14px; min-height:48px;
                       background:{PANEL2}; border:1px solid {LINE}; }}
-QPushButton#bigctl:hover {{ border-color:{ACCENT}; background:#1c2734; }}
+QPushButton#bigctl:hover {{ border-color:{ACCENT}; background:#23262e; }}
 QPushButton#bigctl:pressed {{ background:{ACCENT_SOFT}; }}
 QPushButton#bigopen {{ font-size:14pt; padding:10px 22px; border-radius:12px; min-height:40px;
-                       background:{MINT_GRADIENT}; color:#06140f; border:none; font-weight:700; }}
-QPushButton#bigopen:hover {{ background:qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #5af0b4, stop:1 #38d4c6); }}
+                       background:{MINT_GRADIENT}; color:{ON_ACCENT}; border:none; font-weight:700; }}
+QPushButton#bigopen:hover {{ background:{ACCENT_HI}; }}
 QPushButton#bighome {{ font-size:13pt; padding:10px 18px; border-radius:12px; min-height:40px; }}
 QLabel#filename {{ font-size:12.5pt; color:{TEXT}; background:transparent; padding:2px 4px; font-weight:600; }}
 """
@@ -431,19 +488,19 @@ def kind_of(path):
 
 
 HELP = {
-    "pdf": ("📄  Reading a PDF", [
+    "pdf": ("Reading a PDF", [
         ("👀", "Look at a glowing arrow for 1–2 seconds", "The page scrolls that way. Past the edge, it turns the page."),
         ("😬", "Clench your jaw twice, quickly", "Turns the arrows off (read without flicker) — or back on."),
         ("⏱", "Hold a jaw clench for about 1 second", "Zooms in. Hold again to zoom out."),
         ("😌", "Relax your face while reading", "Frowning or tensing hard can count as a clench."),
     ]),
-    "audio": ("🎵  Listening", [
+    "audio": ("Listening", [
         ("😬", "Clench your jaw once", "Play or pause (it waits about 1 second to see if more clenches follow)."),
         ("⏪", "Clench twice", "Back 15 seconds. Hold the 2nd clench to keep going back, every second."),
         ("⏩", "Clench three times", "Forward 15 seconds. Hold the 3rd clench to keep going forward."),
         ("😌", "Relax your face between clenches", "Tensing hard can count as a clench."),
     ]),
-    "video": ("🎬  Watching", [
+    "video": ("Watching", [
         ("👀", "Look at the glowing ⏪ (left) or ⏩ (right) for 1–2 s", "Skips back or forward 15 seconds."),
         ("😬", "Clench your jaw once", "Play or pause (it waits about 1 second to see if more clenches follow)."),
         ("⏪", "Clench twice", "Back 15 seconds. Hold the 2nd clench to keep going back, every second."),
@@ -451,33 +508,33 @@ HELP = {
     ]),
 }
 HELP_BLINK = {
-    "pdf": ("📄  Reading a PDF", [
+    "pdf": ("Reading a PDF", [
         ("👀", "Look at a glowing arrow for 1–2 seconds", "The page scrolls that way. Past the edge, it turns the page."),
         ("😉", "Blink twice, quickly", "Turns the arrows off (read without flicker) — or back on."),
         ("😌", "Close your eyes for about 1 second", "Zooms in. Do it again to zoom out."),
         ("ℹ", "Normal blinking is fine", "Only two quick, deliberate blinks count (natural double blinks can occasionally trigger it)."),
     ]),
-    "audio": ("🎵  Listening", [
+    "audio": ("Listening", [
         ("😉", "Blink twice, quickly", "Play or pause."),
         ("😌", "Close your eyes for about 1 second", "Go back 15 seconds."),
     ]),
-    "video": ("🎬  Watching", [
+    "video": ("Watching", [
         ("👀", "Look at the glowing ⏪ (left) or ⏩ (right) for 1–2 s", "Skips back or forward 15 seconds."),
         ("😉", "Blink twice, quickly", "Play or pause."),
         ("😌", "Close your eyes for about 1 second", "Go back 15 seconds."),
     ]),
 }
 HELP_ROLL = {
-    "pdf": ("📄  Reading a PDF (eye roll, experimental)", [
+    "pdf": ("Reading a PDF (eye roll, experimental)", [
         ("👀", "Look at a glowing arrow for 1–2 seconds", "The page scrolls that way. Past the edge, it turns the page."),
         ("🙄", "Roll your eyes in one full circle", "Turns the arrows off (read without flicker) — or back on."),
         ("😌", "Close your eyes for about 1 second", "Zooms in. Do it again to zoom out."),
     ]),
-    "audio": ("🎵  Listening (eye roll, experimental)", [
+    "audio": ("Listening (eye roll, experimental)", [
         ("🙄", "Roll your eyes in one full circle", "Play or pause."),
         ("😌", "Close your eyes for about 1 second", "Go back 15 seconds."),
     ]),
-    "video": ("🎬  Watching (eye roll, experimental)", [
+    "video": ("Watching (eye roll, experimental)", [
         ("👀", "Look at the glowing ⏪ (left) or ⏩ (right) for 1–2 s", "Skips back or forward 15 seconds."),
         ("🙄", "Roll your eyes in one full circle", "Play or pause."),
         ("😌", "Close your eyes for about 1 second", "Go back 15 seconds."),
@@ -498,11 +555,13 @@ class HelpOverlay(QFrame):
     def __init__(self, parent):
         super().__init__(parent)
         self.setStyleSheet(f"""
-            HelpOverlay {{ background: rgba(5, 8, 12, 215); }}
-            #helpcard {{ background:{PANEL}; border:1px solid {ACCENT}; border-radius:22px; }}
+            HelpOverlay {{ background: rgba(6, 7, 9, 218); }}
+            #helpcard {{ background:{PANEL}; border:1px solid {LINE}; border-radius:18px; }}
             #helpcard QLabel {{ background:transparent; }}
             #helptitle {{ font-family:"{FONT_DISPLAY}", "Segoe UI"; font-size:20pt; font-weight:700; }}
-            #helpicon {{ font-size:22pt; min-width:44px; }}
+            #helpicon {{ font-family:"{MONO}"; font-size:15pt; color:{ACCENT}; border:1.5px solid {LINE};
+                         border-radius:20px; min-width:40px; max-width:40px; min-height:40px; max-height:40px;
+                         qproperty-alignment:AlignCenter; }}
             #helpdo {{ font-size:14pt; font-weight:600; color:{TEXT}; }}
             #helpwhat {{ font-size:12pt; color:{MUTED}; }}
             #helpsep {{ background:{LINE}; max-height:1px; min-height:1px; }}
@@ -536,7 +595,11 @@ class HelpOverlay(QFrame):
                     if sub.widget():
                         sub.widget().deleteLater()
 
+    SYMBOL = {"👀": "◉", "😬": "J", "⏱": "◷", "😌": "~", "⏪": "«", "⏩": "»", "😉": "◡", "🙄": "↻",
+              "🖱": "↖", "📂": "+", "⌨": "⌨", "ℹ": "i"}
+
     def _row(self, icon, do, what):
+        icon = self.SYMBOL.get(icon, icon)
         h = QHBoxLayout()
         h.setSpacing(16)
         h.addWidget(QLabel(icon, objectName="helpicon"), alignment=Qt.AlignTop)
@@ -596,7 +659,7 @@ class ViewerPage(QWidget):
         sl = QHBoxLayout(segment)
         sl.setContentsMargins(4, 4, 4, 4)
         sl.setSpacing(4)
-        for i, label in enumerate(["📄  Read", "🎵  Listen", "🎬  Watch"]):
+        for i, label in enumerate(["Read", "Listen", "Watch"]):
             b = QPushButton(label, objectName="seg", checkable=True)
             self.tab_buttons.addButton(b, i)
             sl.addWidget(b)
@@ -604,27 +667,30 @@ class ViewerPage(QWidget):
         self.tab_buttons.button(0).setChecked(True)
         self.tab_buttons.idClicked.connect(lambda i: self.set_tab(TABS[i]))
         top.addSpacing(8)
-        open_btn = QPushButton("📂  Open file", objectName="bigopen")
+        open_btn = QPushButton("+  Open files", objectName="bigopen")
         open_btn.setToolTip("Open as many PDFs, audio files and videos as you like "
                             "(or drag files or a whole folder onto this window)")
         open_btn.clicked.connect(self.open_dialog)
         top.addWidget(open_btn)
         self.lib_box = QComboBox()  # this tab's files
         self.lib_box.setMinimumWidth(170)
-        self.lib_box.setMaximumWidth(280)
+        self.lib_box.setMaximumWidth(300)
+        self.lib_box.setSizeAdjustPolicy(QComboBox.AdjustToContents)
         self.lib_box.setToolTip("Files on this tab — pick one to open it")
         self.lib_box.setFocusPolicy(Qt.NoFocus)
         self.lib_box.activated.connect(lambda i: self.pick_file(i))
         top.addWidget(self.lib_box)
-        help_btn = QPushButton("❓  How to use", objectName="bighome")
+        help_btn = QPushButton("?  How to use", objectName="bighome")
         help_btn.clicked.connect(lambda: self.show_help(not self.help.isVisible()))
         top.addWidget(help_btn)
         top.addStretch(1)
+        self.strip = SignalStrip()
+        top.addWidget(self.strip, alignment=Qt.AlignVCenter)
         self.status = QLabel(objectName="pill")
         self.status.setMinimumWidth(1)
         self.status.setMaximumWidth(420)
         top.addWidget(self.status, alignment=Qt.AlignVCenter)
-        self.gear = QPushButton("⚙", objectName="bighome")
+        self.gear = QPushButton("Settings", objectName="bighome")
         self.gear.setToolTip("Flicker settings")
         top.addWidget(self.gear)
         for w in bar.findChildren(QPushButton):
@@ -757,7 +823,7 @@ class ViewerPage(QWidget):
         v.addStretch(1)
         self.a_icon = QLabel("▶", objectName="big_icon", alignment=Qt.AlignCenter)
         self.a_time = QLabel("0:00", alignment=Qt.AlignCenter)
-        self.a_time.setStyleSheet("font-size:16pt;")
+        self.a_time.setStyleSheet(f"font-family:'{MONO}'; font-size:15pt; color:{MUTED};")
         self.a_bar = QSlider(Qt.Horizontal, enabled=False)
         self.a_bar.setFixedWidth(560)
         v.addWidget(self.a_icon, alignment=Qt.AlignCenter)
@@ -846,7 +912,9 @@ class ViewerPage(QWidget):
         self.lib_box.blockSignals(True)
         self.lib_box.clear()
         for i, f in enumerate(lst, 1):
-            self.lib_box.addItem(f"{i}/{len(lst)}  {Path(f).name}", f)
+            name = Path(f).name
+            name = name if len(name) <= 26 else name[:16] + "…" + name[-8:]
+            self.lib_box.addItem(f"{i}/{len(lst)}  {name}", f)
         if cur in lst:
             self.lib_box.setCurrentIndex(lst.index(cur))
         self.lib_box.setVisible(bool(lst))
@@ -892,14 +960,14 @@ class ViewerPage(QWidget):
     def load_pdf(self, path):
         self.pdf.load(path)
         self.files["pdf"] = str(path)
-        self.pdf_name.setText(f"📄  {Path(path).name}")
+        self.pdf_name.setText(Path(path).name)
 
     def load_audio(self, path):
         self.audio.stop()
         self.audio.setSource(QUrl.fromLocalFile(str(path)))
         self.audio.setLoops(QMediaPlayer.Infinite if "sample_audio" in str(path) else 1)
         self.files["audio"] = str(path)
-        self.audio_name.setText(f"🎵  {Path(path).name}")
+        self.audio_name.setText(Path(path).name)
         if hasattr(self, "lib_box") and self.tab == "audio":
             self.refresh_lib_box()
 
@@ -907,7 +975,7 @@ class ViewerPage(QWidget):
         self.video.stop()
         self.video.setSource(QUrl.fromLocalFile(str(path)))
         self.files["video"] = str(path)
-        self.video_name.setText(f"🎬  {Path(path).name}")
+        self.video_name.setText(Path(path).name)
         if hasattr(self, "lib_box") and self.tab == "video":
             self.refresh_lib_box()
 
@@ -958,7 +1026,7 @@ class ViewerPage(QWidget):
         for kind, path in (s.get("last_files") or {}).items():
             if path and Path(path).exists() and path != self.files.get(kind):
                 self.open_path(path, remember=False)
-        self.pdf_name.setText(f"📄  {Path(self.files['pdf']).name}")
+        self.pdf_name.setText(Path(self.files['pdf']).name)
         self.slider.blockSignals(True)
         self.slider.setValue(int(round(s["flicker_strength"] * 100)))
         self.slider.blockSignals(False)
@@ -1191,6 +1259,7 @@ class ViewerPage(QWidget):
         t = m["type"]
         if t == "status":
             self.status.setText(status_html(m, compact=True))
+            self.strip.push(m)
         elif not self.isVisible():
             return
         elif self.mode == "jaw" and self.tab in ("audio", "video") and t in (
@@ -1306,8 +1375,8 @@ class CueCanvas(QWidget):
         p.setRenderHint(QPainter.Antialiasing)
         r = QRectF(self.rect())
         bg = QRadialGradient(r.center(), max(r.width(), r.height()) * 0.7)
-        bg.setColorAt(0, QColor("#0f1520"))
-        bg.setColorAt(1, QColor("#070a0f"))
+        bg.setColorAt(0, QColor("#15171c"))
+        bg.setColorAt(1, QColor("#09090b"))
         p.setPen(Qt.NoPen)
         p.setBrush(bg)
         p.drawRoundedRect(r, 18, 18)
@@ -1358,7 +1427,7 @@ class CueCanvas(QWidget):
             p.setFont(QFont(FONT, 9, QFont.Bold))
             w = p.fontMetrics().horizontalAdvance(chip) + 28
             cr = QRectF(r.center().x() - w / 2, 26, w, 26)
-            chip_color = QColor(ACCENT if (self.phase == "action" and not self.listening) else "#7aa7ff" if self.listening else MUTED)
+            chip_color = QColor(ACCENT if (self.phase == "action" and not self.listening) else "#c3b5ff" if self.listening else MUTED)
             fill = QColor(chip_color)
             fill.setAlpha(36)
             p.setPen(QPen(chip_color, 1))
@@ -1372,7 +1441,7 @@ class CueCanvas(QWidget):
         p.setFont(QFont(FONT_DISPLAY, 24 if self.phase == "action" else 20, QFont.Bold))
         p.drawText(QRectF(40, 64, r.width() - 80, 100), Qt.AlignHCenter | Qt.AlignTop | Qt.TextWordWrap, self.text)
         p.setPen(QColor(MUTED))
-        p.setFont(QFont(FONT, 13))
+        p.setFont(QFont(MONO, 12))
         p.drawText(QRectF(20, r.height() - 56, r.width() - 40, 36), Qt.AlignHCenter | Qt.AlignVCenter, self.sub)
 
 
@@ -1440,7 +1509,7 @@ class MeterPanel(QWidget):
                     over = v <= thrs[0]
                 else:
                     over = v >= thrs[0]
-                p.setBrush(QColor(ACCENT if over else "#5a6b80"))
+                p.setBrush(QColor(ACCENT if over else "#4a5262"))
                 p.drawRoundedRect(QRectF(min(zero, xv), y + 7, max(2.0, abs(xv - zero)), 6), 3, 3)
                 p.setPen(QColor(TEXT))
                 p.drawText(QRectF(x0 + w + 6, y, 54, 20), Qt.AlignVCenter | Qt.AlignLeft,
@@ -1473,7 +1542,7 @@ class EventTiles(QWidget):
 
     def _style(self, key, lit):
         self.tiles[key].setStyleSheet(
-            f"background:{ACCENT if lit else PANEL}; color:{'#08110c' if lit else TEXT}; border:1px solid {LINE};"
+            f"background:{ACCENT if lit else PANEL}; color:{ON_ACCENT if lit else TEXT}; border:1px solid {LINE};"
             "border-radius:6px; font-size:9pt;")
 
     def fire(self, m):
@@ -1553,12 +1622,12 @@ class CalibPage(QWidget):
         self.total = QLabel(objectName="hint")
         lv.addWidget(self.total)
         lv.addSpacing(8)
-        self.btn_quick = QPushButton("⚡ Quick: flicker · blink · jaw", objectName="primary")
+        self.btn_quick = QPushButton("Quick: flicker · blink · jaw", objectName="primary")
         self.btn_quick.setToolTip("Only the flicker rates the viewer uses, then blinks, then jaw clench "
                                   "(+ eye roll when that's the action input), in that order (~4 min)")
         self.btn_quick.clicked.connect(self.start_quick)
         self.btn_cal = QPushButton("Full calibration (ticked inputs)")
-        self.btn_roll = QPushButton("👁  Eye roll calibration (experimental)")
+        self.btn_roll = QPushButton("Eye roll calibration (experimental)")
         self.btn_roll.setToolTip("Calibrates only the experimental eye-roll input (~1 min). "
                                  "It isn't used by the viewer yet.")
         self.btn_roll.clicked.connect(self.start_roll)
@@ -2035,6 +2104,8 @@ class StartPage(QWidget):
         titles.addWidget(tag)
         header.addLayout(titles)
         header.addStretch(1)
+        self.strip = SignalStrip(170)
+        header.addWidget(self.strip, alignment=Qt.AlignVCenter)
         self.conn_pill = QLabel(objectName="pill")
         self.conn_pill.setMinimumWidth(1)      # long stream names must never widen the window
         self.conn_pill.setMaximumWidth(460)
@@ -2109,10 +2180,10 @@ class StartPage(QWidget):
         outer.addLayout(step_header(3, "Choose what to do"))
         choices = QHBoxLayout()
         choices.setSpacing(18)
-        choices.addWidget(ChoiceCard("🧪", "Calibrate & test",
+        choices.addWidget(ChoiceCard("∿", "Calibrate & test",
                                      "Guided calibration of every signal, a scored live test and live meters — "
                                      "saved to this person's profile.", lambda: self.main.go("calib")), 1)
-        choices.addWidget(ChoiceCard("📖", "Use the viewer",
+        choices.addWidget(ChoiceCard("▤", "Use the viewer",
                                      "Read PDFs, listen to audio and watch video hands-free, "
                                      "with this person's settings.", lambda: self.main.go("viewer")), 1)
         outer.addLayout(choices)
@@ -2187,6 +2258,7 @@ class StartPage(QWidget):
             return
         self.conn.setText(status_html(m))
         self.conn_pill.setText(status_html(m, compact=True))
+        self.strip.push(m)
         if m.get("connected"):
             names = "" if m.get("names_from_stream", True) else \
                 " · channel names missing, assuming the standard eego 24 layout"
@@ -2329,6 +2401,14 @@ class MainWindow(QMainWindow):
         super().closeEvent(e)
 
 
+def load_fonts():
+    """Bundled open-source fonts (fonts/*.ttf, OFL licence), so the app looks the same offline."""
+    from PySide6.QtGui import QFontDatabase
+    for f in sorted((HERE / "fonts").glob("*.ttf")):
+        QFontDatabase.addApplicationFont(str(f))
+    QApplication.setFont(QFont(FONT, 10))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--fake", action="store_true", help="start with the practice (fake) headset connected")
@@ -2341,6 +2421,7 @@ def main():
         raise SystemExit(f"No PDF at {args.pdf}. Run: uv run python bci_demo/make_media.py  (or pass --pdf FILE)")
 
     app = QApplication(sys.argv)
+    load_fonts()
     if (HERE / "icon.ico").exists():
         app.setWindowIcon(QIcon(str(HERE / "icon.ico")))
     if not args.no_warning:
