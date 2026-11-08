@@ -56,7 +56,7 @@ ACCENT, WARN, BAD, ARROW = "#34d399", "#fbbf24", "#f87171", "#ff5a52"
 ACCENT_SOFT = "#123327"
 FONT, FONT_DISPLAY = "Segoe UI Variable Text", "Segoe UI Variable Display"
 VERDICT_COLOR = {"Good": ACCENT, "OK": WARN, "Poor": BAD}
-GLOW_STOPS = [(0.0, 1.0), (0.25, 0.82), (0.5, 0.46), (0.75, 0.17), (1.0, 0.0)]  # Gaussian falloff
+GLOW_STOPS = [(0.0, 1.0), (0.35, 0.95), (0.6, 0.65), (0.8, 0.3), (1.0, 0.0)]  # soft edge, wide bright core
 MINT_GRADIENT = "qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #3ee6a3, stop:1 #22c3b5)"
 
 STYLE = f"""
@@ -158,6 +158,7 @@ def status_html(m, compact=False):
     f = m.get("features", {})
     calib = " · <b>calibrating, stay still</b>" if m.get("calibrating") else ""
     if compact:
+        calib = " · <b>settling…</b>" if m.get("calibrating") else ""
         jaw = f.get("jaw")
         jaw_txt = (f" &nbsp;·&nbsp; jaw <b style='color:{WARN if m.get('clenching') else TEXT}'>{jaw:.1f}×</b>"
                    if jaw is not None else "")
@@ -219,7 +220,15 @@ class FlickerTarget(QWidget):
         p.setBrush(bg)
         p.drawRoundedRect(r, 18, 18)
         if not self.off and Flicker.style == "glow":
-            paint_glow(p, r.center(), min(r.width(), r.height()) * 0.44, level)
+            # stretch the soft glow into an oval that fills the whole tile: much more flickering
+            # area (= stronger brain response) than a circle limited by the tile's short side
+            rx, ry = r.width() * 0.5, r.height() * 0.5
+            rad = min(rx, ry)
+            p.save()
+            p.translate(r.center())
+            p.scale(rx / rad, ry / rad)
+            paint_glow(p, QPointF(0, 0), rad, level)
+            p.restore()
         if now < self.hit_until:  # selected: mint outline and tint
             p.setPen(QPen(QColor(ACCENT), 3))
             p.setBrush(QColor(52, 211, 153, 40))
@@ -557,6 +566,8 @@ class ViewerPage(QWidget):
         top.addWidget(help_btn)
         top.addStretch(1)
         self.status = QLabel(objectName="pill")
+        self.status.setMinimumWidth(1)
+        self.status.setMaximumWidth(420)
         top.addWidget(self.status, alignment=Qt.AlignVCenter)
         self.gear = QPushButton("⚙", objectName="bighome")
         self.gear.setToolTip("Flicker settings")
@@ -641,7 +652,7 @@ class ViewerPage(QWidget):
         self.pdf = PdfView(pdf_path)
 
         def centered(tile):  # compact up/down tiles, centred, instead of full-width bars
-            tile.setFixedSize(340, 88)
+            tile.setFixedSize(460, 104)
             box = QWidget()
             h = QHBoxLayout(box)
             h.setContentsMargins(0, 0, 0, 0)
@@ -656,7 +667,7 @@ class ViewerPage(QWidget):
         g.addWidget(self.targets["right"], 1, 2)
         g.addWidget(centered(self.targets["down"]), 2, 1)
         for t in ("left", "right"):
-            self.targets[t].setFixedWidth(118)
+            self.targets[t].setFixedWidth(150)
         g.setRowStretch(1, 1)
         g.setColumnStretch(1, 1)
         v.addLayout(g, 1)
@@ -1287,6 +1298,7 @@ class CalibPage(QWidget):
         bar, top = top_bar("Calibrate & test", self.go_home)
         top.addStretch(1)
         self.status = QLabel()
+        self.status.setMinimumWidth(1)
         top.addWidget(self.status)
 
         # ---- left: what to run
@@ -1749,10 +1761,13 @@ class StartPage(QWidget):
         tag = QLabel("Look at a glowing target. Clench your jaw. Read, listen and watch — no hands needed.",
                      objectName="hint")
         tag.setStyleSheet("font-size:12pt;")
+        tag.setWordWrap(True)
         titles.addWidget(tag)
         header.addLayout(titles)
         header.addStretch(1)
         self.conn_pill = QLabel(objectName="pill")
+        self.conn_pill.setMinimumWidth(1)      # long stream names must never widen the window
+        self.conn_pill.setMaximumWidth(460)
         header.addWidget(self.conn_pill, alignment=Qt.AlignVCenter)
         outer.addLayout(header)
 
@@ -1810,6 +1825,7 @@ class StartPage(QWidget):
         connect.clicked.connect(self.connect)
         hv.addWidget(connect)
         self.conn = QLabel(wordWrap=True)
+        self.conn.setMinimumWidth(1)
         hv.addWidget(self.conn)
         self.conn_detail = QLabel(objectName="hint", wordWrap=True)
         hv.addWidget(self.conn_detail)
@@ -1832,7 +1848,8 @@ class StartPage(QWidget):
         outer.addLayout(choices)
         outer.addStretch(1)
         foot = QHBoxLayout()
-        self.data_label = QLabel(objectName="hint")
+        self.data_label = QLabel(objectName="hint", wordWrap=True)
+        self.data_label.setMinimumWidth(1)
         foot.addWidget(self.data_label, 1)
         open_btn = QPushButton("Open data folder")
         open_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(str(data_dir()))))
@@ -1858,7 +1875,8 @@ class StartPage(QWidget):
                                       + (f"<br>Works well: {', '.join(good)}" if good else ""))
         else:
             self.profile_info.setText("Not calibrated yet. Default settings are used until you calibrate.")
-        self.data_label.setText(f"Profiles and trials are saved in {data_dir()}")
+        self.data_label.setText(f"Profiles and recordings are saved in Documents › {data_dir().name}")
+        self.data_label.setToolTip(str(data_dir()))
         self.rb_fake.setChecked(bool(self.main.engine.status.get("fake")))
         self.rb_real.setChecked(not self.main.engine.status.get("fake"))
 
