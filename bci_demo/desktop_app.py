@@ -37,6 +37,7 @@ try:
 except ImportError:  # speech is optional
     QTextToSpeech = None
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QCheckBox, QComboBox, QFileDialog, QFrame, QGridLayout,
+                               QMenu, QWidgetAction,
                                QHBoxLayout,
                                QHeaderView, QInputDialog, QLabel, QLineEdit, QMainWindow, QMessageBox, QProgressBar,
                                QPushButton, QRadioButton, QSlider, QStackedWidget, QTableWidget, QTableWidgetItem,
@@ -249,6 +250,7 @@ class PdfView(QWidget):
         self.page, self.zoom, self.x, self.y = 0, 1.0, 0.0, 0.0
         self.shown = [0.0, 0.0, 0.0]
         self.arrows_on = True
+        self.name = Path(path).name
         self.M = 16  # margin around the page, so it sits on a "desk" with a shadow
         self.setMinimumSize(200, 200)
 
@@ -261,6 +263,7 @@ class PdfView(QWidget):
         if len(doc) == 0:
             raise ValueError("the PDF has no pages")
         self.doc, self.pages, self.cache = doc, len(doc), {}
+        self.name = Path(path).name
         self.page, self.zoom, self.x, self.y = 0, 1.0, 0.0, 0.0
         self.clamp(snap=True)
 
@@ -353,9 +356,10 @@ class PdfView(QWidget):
         p.setClipRect(view)
         p.drawImage(page, img)
         p.restore()
-        info = (f"page {self.page + 1} / {self.pages}  ·  {'fit' if self.zoom == 1 else f'{self.zoom:g}×'}"
+        name = self.name if len(self.name) <= 32 else self.name[:29] + "…"
+        info = (f"📄 {name}  ·  page {self.page + 1} / {self.pages}  ·  {'fit' if self.zoom == 1 else f'{self.zoom:g}×'}"
                 f"  ·  arrows {'on' if self.arrows_on else 'off'}")
-        p.setFont(QFont(FONT, 9, QFont.DemiBold))
+        p.setFont(QFont(FONT, 9.5, QFont.DemiBold))
         w = p.fontMetrics().horizontalAdvance(info) + 24
         box = QRectF(self.width() - w - M - 8, self.height() - M - 36, w, 26)
         p.setBrush(QColor(11, 15, 22, 215))
@@ -391,7 +395,7 @@ QPushButton#seg {{ background:transparent; border:1px solid transparent; font-si
                    border-radius:10px; min-height:40px; color:{MUTED}; }}
 QPushButton#seg:hover {{ color:{TEXT}; background:#1f2a39; }}
 QPushButton#seg:checked {{ background:{ACCENT_SOFT}; border:1px solid {ACCENT}; color:#d6fbe8; }}
-QPushButton#bigctl {{ font-size:15pt; padding:12px 18px; border-radius:16px; min-height:60px;
+QPushButton#bigctl {{ font-size:13.5pt; padding:8px 16px; border-radius:14px; min-height:48px;
                       background:{PANEL2}; border:1px solid {LINE}; }}
 QPushButton#bigctl:hover {{ border-color:{ACCENT}; background:#1c2734; }}
 QPushButton#bigctl:pressed {{ background:{ACCENT_SOFT}; }}
@@ -406,6 +410,104 @@ QLabel#filename {{ font-size:12.5pt; color:{TEXT}; background:transparent; paddi
 def kind_of(path):
     ext = Path(path).suffix.lower()
     return "pdf" if ext in PDF_EXT else "audio" if ext in AUDIO_EXT else "video" if ext in VIDEO_EXT else None
+
+
+HELP = {
+    "pdf": ("📄  Reading a PDF", [
+        ("👀", "Look at a glowing arrow for 1–2 seconds", "The page scrolls that way. Past the edge, it turns the page."),
+        ("😬", "Clench your jaw twice, quickly", "Turns the arrows off (read without flicker) — or back on."),
+        ("⏱", "Hold a jaw clench for about 1 second", "Zooms in. Hold again to zoom out."),
+        ("😌", "Relax your face while reading", "Frowning or tensing hard can count as a clench."),
+    ]),
+    "audio": ("🎵  Listening", [
+        ("😬", "Clench your jaw twice, quickly", "Play or pause."),
+        ("😬", "Clench once", "Go back 15 seconds (it waits 1.5 s in case a second clench is coming)."),
+        ("😌", "Relax your face between clenches", "Tensing hard can count as a clench."),
+    ]),
+    "video": ("🎬  Watching", [
+        ("👀", "Look at the glowing ⏪ (left) or ⏩ (right) for 1–2 s", "Skips back or forward 15 seconds."),
+        ("😬", "Clench your jaw once", "Play or pause."),
+        ("😌", "Relax your face between clenches", "Tensing hard can count as a clench."),
+    ]),
+}
+HELP_COMMON = [
+    ("🖱", "Big buttons at the bottom", "Do the same things with a click — for helpers, or as a backup."),
+    ("📂", "Open file (or drag one onto the window)", "Use your own PDF, audio or video."),
+    ("⌨", "Keyboard backup", "Arrow keys = look at an arrow · J = jaw (tap, tap twice, hold)."),
+]
+
+
+class HelpOverlay(QFrame):
+    """Large, easy-to-read instructions for the current tab, over a dimmed screen."""
+
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.setStyleSheet(f"""
+            HelpOverlay {{ background: rgba(5, 8, 12, 215); }}
+            #helpcard {{ background:{PANEL}; border:1px solid {ACCENT}; border-radius:22px; }}
+            #helpcard QLabel {{ background:transparent; }}
+            #helptitle {{ font-family:"{FONT_DISPLAY}", "Segoe UI"; font-size:20pt; font-weight:700; }}
+            #helpicon {{ font-size:22pt; min-width:44px; }}
+            #helpdo {{ font-size:14pt; font-weight:600; color:{TEXT}; }}
+            #helpwhat {{ font-size:12pt; color:{MUTED}; }}
+            #helpsep {{ background:{LINE}; max-height:1px; min-height:1px; }}
+        """)
+        outer = QVBoxLayout(self)
+        outer.addStretch(1)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        self.card = QFrame(objectName="helpcard")
+        self.card.setMaximumWidth(820)
+        self.lay = QVBoxLayout(self.card)
+        self.lay.setContentsMargins(34, 28, 34, 26)
+        self.lay.setSpacing(12)
+        row.addWidget(self.card, 6)
+        row.addStretch(1)
+        outer.addLayout(row)
+        outer.addStretch(1)
+
+    def mousePressEvent(self, e):
+        if not self.card.geometry().contains(e.position().toPoint()):
+            self.hide()  # click outside the card to close
+
+    def _clear(self):
+        while self.lay.count():
+            item = self.lay.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+            elif item.layout():
+                while item.layout().count():
+                    sub = item.layout().takeAt(0)
+                    if sub.widget():
+                        sub.widget().deleteLater()
+
+    def _row(self, icon, do, what):
+        h = QHBoxLayout()
+        h.setSpacing(16)
+        h.addWidget(QLabel(icon, objectName="helpicon"), alignment=Qt.AlignTop)
+        v = QVBoxLayout()
+        v.setSpacing(2)
+        v.addWidget(QLabel(do, objectName="helpdo", wordWrap=True))
+        v.addWidget(QLabel(what, objectName="helpwhat", wordWrap=True))
+        h.addLayout(v, 1)
+        self.lay.addLayout(h)
+
+    def set_tab(self, tab):
+        self._clear()
+        title, rows = HELP[tab]
+        self.lay.addWidget(QLabel(f"How to use — {title}", objectName="helptitle"))
+        for r in rows:
+            self._row(*r)
+        self.lay.addWidget(QFrame(objectName="helpsep"))
+        for r in HELP_COMMON:
+            self._row(*r)
+        ok = QPushButton("Got it", objectName="primary")
+        ok.setMinimumHeight(48)
+        ok.setStyleSheet("font-size:14pt;")
+        ok.setFocusPolicy(Qt.NoFocus)
+        ok.clicked.connect(self.hide)
+        self.lay.addSpacing(6)
+        self.lay.addWidget(ok)
 
 
 class ViewerPage(QWidget):
@@ -450,9 +552,15 @@ class ViewerPage(QWidget):
         open_btn.setToolTip("Open your own PDF, audio or video (or drag a file onto this window)")
         open_btn.clicked.connect(self.open_dialog)
         top.addWidget(open_btn)
+        help_btn = QPushButton("❓  How to use", objectName="bighome")
+        help_btn.clicked.connect(lambda: self.show_help(not self.help.isVisible()))
+        top.addWidget(help_btn)
         top.addStretch(1)
         self.status = QLabel(objectName="pill")
         top.addWidget(self.status, alignment=Qt.AlignVCenter)
+        self.gear = QPushButton("⚙", objectName="bighome")
+        self.gear.setToolTip("Flicker settings")
+        top.addWidget(self.gear)
         for w in bar.findChildren(QPushButton):
             w.setFocusPolicy(Qt.NoFocus)
 
@@ -464,13 +572,13 @@ class ViewerPage(QWidget):
         self.stack.addWidget(self.build_audio())
         self.stack.addWidget(self.build_video())
 
-        # ---- bottom: what the jaw does here, and flicker comfort settings (small, out of the way)
-        foot = QWidget(objectName="bar")
-        fl = QHBoxLayout(foot)
-        fl.setContentsMargins(14, 4, 14, 4)
-        self.hint = QLabel(objectName="hint")
-        fl.addWidget(self.hint, 1)
-        fl.addWidget(QLabel("Flicker"))
+        # ---- flicker comfort settings live in the gear menu (out of the way, more room for content)
+        settings = QWidget()
+        settings.setStyleSheet(f"background:{PANEL2};")
+        fl = QHBoxLayout(settings)
+        fl.setContentsMargins(14, 10, 14, 10)
+        self.hint = QLabel(objectName="hint")  # (instructions now live in the How-to-use card)
+        fl.addWidget(QLabel("Flicker strength"))
         self.slider = QSlider(Qt.Horizontal, minimum=10, maximum=100, singleStep=5, pageStep=10)
         self.slider.setFixedWidth(120)
         self.slider.setToolTip("Lower = gentler on the eyes, but a weaker brain signal")
@@ -484,13 +592,21 @@ class ViewerPage(QWidget):
         fl.addWidget(self.style_box)
         for w in (self.slider, self.style_box):
             w.setFocusPolicy(Qt.NoFocus)
+        menu = QMenu(self)
+        act = QWidgetAction(menu)
+        act.setDefaultWidget(settings)
+        menu.addAction(act)
+        self.gear.setMenu(menu)
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
         lay.addWidget(bar)
         lay.addWidget(self.stack, 1)
-        lay.addWidget(foot)
+
+        self.help = HelpOverlay(self)
+        self.help.hide()
+        self.help_shown_once = False
 
         self.toast_label = QLabel(self, objectName="toast")
         self.toast_label.hide()
@@ -517,21 +633,30 @@ class ViewerPage(QWidget):
     def build_pdf(self, pdf_path):
         w = QWidget()
         v = QVBoxLayout(w)
-        v.setContentsMargins(12, 8, 12, 12)
+        v.setContentsMargins(10, 8, 10, 10)
         v.setSpacing(8)
-        self.pdf_name = QLabel(objectName="filename")
-        v.addWidget(self.pdf_name)
+        self.pdf_name = QLabel()  # the file name now shows in the page's info pill
         g = QGridLayout()
-        g.setSpacing(10)
+        g.setSpacing(8)
         self.pdf = PdfView(pdf_path)
-        g.addWidget(self.targets["up"], 0, 1)
+
+        def centered(tile):  # compact up/down tiles, centred, instead of full-width bars
+            tile.setFixedSize(340, 88)
+            box = QWidget()
+            h = QHBoxLayout(box)
+            h.setContentsMargins(0, 0, 0, 0)
+            h.addStretch(1)
+            h.addWidget(tile)
+            h.addStretch(1)
+            return box
+
+        g.addWidget(centered(self.targets["up"]), 0, 1)
         g.addWidget(self.targets["left"], 1, 0)
         g.addWidget(self.pdf, 1, 1)
         g.addWidget(self.targets["right"], 1, 2)
-        g.addWidget(self.targets["down"], 2, 1)
-        for i in (0, 2):
-            g.setRowMinimumHeight(i, 120)
-            g.setColumnMinimumWidth(i, 130)
+        g.addWidget(centered(self.targets["down"]), 2, 1)
+        for t in ("left", "right"):
+            self.targets[t].setFixedWidth(118)
         g.setRowStretch(1, 1)
         g.setColumnStretch(1, 1)
         v.addLayout(g, 1)
@@ -682,6 +807,20 @@ class ViewerPage(QWidget):
         self.style_box.setCurrentIndex(0 if s["flicker_style"] == "glow" else 1)
         self.style_box.blockSignals(False)
         self.set_tab(self.tab)
+        if not self.help_shown_once:  # first time the viewer opens: show the instructions
+            self.help_shown_once = True
+            self.show_help(True)
+
+    def show_help(self, on):
+        self.help.set_tab(self.tab)
+        self.help.setGeometry(self.rect())
+        self.help.setVisible(on)
+        if on:
+            self.help.raise_()
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self.help.setGeometry(self.rect())
 
     def deactivate(self):
         self.main.engine.set_inputs(None)
@@ -733,6 +872,8 @@ class ViewerPage(QWidget):
             "pdf": "Look at a glowing arrow to scroll · jaw: clench twice = arrows on/off, hold 1 s = zoom",
             "audio": "Jaw: clench twice = play / pause · clench once = back 15 s",
             "video": "Look at a glowing arrow to skip 15 s · jaw: clench = play / pause"}[name])
+        if self.help.isVisible():
+            self.help.set_tab(name)
         self.send_targets()
 
     def audio_progress(self, pos):
@@ -835,6 +976,10 @@ class ViewerPage(QWidget):
     def handle_key(self, e):
         press = e.type() == QEvent.KeyPress
         key, repeat = e.key(), e.isAutoRepeat()
+        if self.help.isVisible() and key in (Qt.Key_Escape, Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space):
+            if press:
+                self.show_help(False)
+            return True
         fake = self.main.fake if self.main.engine.status.get("fake") else None
         via_eeg = fake is not None and bool(e.modifiers() & Qt.ShiftModifier)
         keymap = PDF_KEYS if self.tab == "pdf" else VIDEO_KEYS if self.tab == "video" else {}
