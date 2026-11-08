@@ -484,8 +484,10 @@ HELP_ROLL = {
     ]),
 }
 HELP_COMMON = [
-    ("🖱", "Click instead", "Click an arrow tile, or the big buttons on Listen / Watch — for helpers, or as a backup."),
-    ("📂", "Open file (or drag one onto the window)", "Use your own PDF, audio or video."),
+    ("🖱", "Click instead", "Click any glowing arrow tile — for helpers, or as a backup."),
+    ("📂", "Open files (or drag files / a folder onto the window)",
+     "Bring in as many PDFs, audio files and videos as you like; pick one from the list at the top. "
+     "Audio and video move on to the next file by themselves."),
     ("⌨", "Keyboard backup", "Arrow keys = look at an arrow · J = jaw (tap 1, 2 or 3 times; hold)."),
 ]
 
@@ -576,6 +578,7 @@ class ViewerPage(QWidget):
         self.look_key = None
         self.files = {"pdf": str(pdf_path), "audio": str(HERE / "static" / "media" / "sample_audio.wav"),
                       "video": str(HERE / "static" / "media" / "sample_video.mp4")}
+        self.library = {k: [v] for k, v in self.files.items()}  # every file brought in, per tab
         self.setStyleSheet(VIEWER_STYLE)
         self.setAcceptDrops(True)
 
@@ -602,9 +605,17 @@ class ViewerPage(QWidget):
         self.tab_buttons.idClicked.connect(lambda i: self.set_tab(TABS[i]))
         top.addSpacing(8)
         open_btn = QPushButton("📂  Open file", objectName="bigopen")
-        open_btn.setToolTip("Open your own PDF, audio or video (or drag a file onto this window)")
+        open_btn.setToolTip("Open as many PDFs, audio files and videos as you like "
+                            "(or drag files or a whole folder onto this window)")
         open_btn.clicked.connect(self.open_dialog)
         top.addWidget(open_btn)
+        self.lib_box = QComboBox()  # this tab's files
+        self.lib_box.setMinimumWidth(170)
+        self.lib_box.setMaximumWidth(280)
+        self.lib_box.setToolTip("Files on this tab — pick one to open it")
+        self.lib_box.setFocusPolicy(Qt.NoFocus)
+        self.lib_box.activated.connect(lambda i: self.pick_file(i))
+        top.addWidget(self.lib_box)
         help_btn = QPushButton("❓  How to use", objectName="bighome")
         help_btn.clicked.connect(lambda: self.show_help(not self.help.isVisible()))
         top.addWidget(help_btn)
@@ -754,17 +765,14 @@ class ViewerPage(QWidget):
         v.addWidget(self.a_bar, alignment=Qt.AlignCenter)
         v.addWidget(self.a_time)
         v.addStretch(1)
-        self.btn_audio_play = self.big_button("▶  Play", lambda: self.toast(self.toggle(self.audio).capitalize()))
-        v.addLayout(self.controls([
-            self.big_button("⏪  Back 15 s", lambda: (self.skip(self.audio, -15000), self.toast("Back 15 s"))),
-            self.btn_audio_play,
-            self.big_button("Forward 15 s  ⏩", lambda: (self.skip(self.audio, 15000), self.toast("Forward 15 s"))),
-        ]))
+        self.btn_audio_play = QPushButton()  # (button row removed: jaw / keyboard control playback)
         self.audio = QMediaPlayer(self)
         self.audio_out = QAudioOutput(self)
         self.audio.setAudioOutput(self.audio_out)
         self.audio.positionChanged.connect(self.audio_progress)
         self.audio.playbackStateChanged.connect(self.audio_state)
+        self.audio.mediaStatusChanged.connect(
+            lambda st: st == QMediaPlayer.EndOfMedia and self.next_file("audio"))
         self.load_audio(self.files["audio"])
         return w
 
@@ -786,25 +794,80 @@ class ViewerPage(QWidget):
         self.video.setAudioOutput(self.video_out)
         self.video.setVideoOutput(vw)
         self.video.playbackStateChanged.connect(self.video_state)
+        self.video.mediaStatusChanged.connect(
+            lambda st: st == QMediaPlayer.EndOfMedia and self.next_file("video"))
         h.addWidget(self.targets["back"])
         h.addWidget(vw, 1)
         h.addWidget(self.targets["fwd"])
         v.addLayout(h, 1)
-        self.btn_video_play = self.big_button("▶  Play", lambda: self.toast(self.toggle(self.video).capitalize()))
-        v.addLayout(self.controls([
-            self.big_button("⏪  Back 15 s", lambda: self.act("back")),
-            self.btn_video_play,
-            self.big_button("Forward 15 s  ⏩", lambda: self.act("fwd")),
-        ]))
+        self.btn_video_play = QPushButton()  # (button row removed: flicker / jaw / keyboard control playback)
         self.load_video(self.files["video"])
         return w
 
-    # ---------- files
+    # ---------- files: each tab keeps a list; open any number at once
     def open_dialog(self):
         start = str(Path(self.files.get(self.tab) or Path.home()).parent)
-        path, _ = QFileDialog.getOpenFileName(self, "Open a PDF, audio or video file", start, OPEN_FILTER)
-        if path:
-            self.open_path(path)
+        paths, _ = QFileDialog.getOpenFileNames(self, "Open PDFs, audio or video (select as many as you like)",
+                                                start, OPEN_FILTER)
+        if paths:
+            self.open_paths(paths)
+
+    def open_paths(self, paths):
+        """Add many files (and folders) to the right lists, open the first new one."""
+        found = []
+        for p in paths:
+            p = Path(p)
+            if p.is_dir():
+                found += sorted(str(f) for f in p.rglob("*") if f.is_file() and kind_of(f))
+            elif kind_of(p):
+                found.append(str(p))
+        if not found:
+            QMessageBox.warning(self, "Nothing to open", "None of those are PDF, audio or video files.")
+            return
+        added = {"pdf": 0, "audio": 0, "video": 0}
+        for f in found:
+            lst = self.library[kind_of(f)]
+            if f not in lst:
+                lst.append(f)
+                added[kind_of(f)] += 1
+        self.save_library()
+        self.open_path(found[0])
+        summary = ", ".join(f"{n} {k if k != 'pdf' else 'PDF'}{'s' if n != 1 and k == 'pdf' else ''}"
+                            for k, n in added.items() if n)
+        if len(found) > 1:
+            self.toast(f"Added {summary}" if summary else "Already in your lists")
+
+    def save_library(self):
+        self.main.profile.settings["library"] = {k: list(v) for k, v in self.library.items()}
+        self.main.profile.save()
+
+    def refresh_lib_box(self):
+        lst, cur = self.library[self.tab], self.files.get(self.tab)
+        self.lib_box.blockSignals(True)
+        self.lib_box.clear()
+        for i, f in enumerate(lst, 1):
+            self.lib_box.addItem(f"{i}/{len(lst)}  {Path(f).name}", f)
+        if cur in lst:
+            self.lib_box.setCurrentIndex(lst.index(cur))
+        self.lib_box.setVisible(bool(lst))
+        self.lib_box.blockSignals(False)
+
+    def pick_file(self, i):
+        lst = self.library[self.tab]
+        if 0 <= i < len(lst):
+            self.open_path(lst[i])
+
+    def next_file(self, kind):
+        """Audio / video: when one file ends, play the next one in the list."""
+        lst, cur = self.library[kind], self.files.get(kind)
+        if cur in lst and lst.index(cur) + 1 < len(lst):
+            nxt = lst[lst.index(cur) + 1]
+            {"audio": self.load_audio, "video": self.load_video}[kind](nxt)
+            self.main.profile.settings.setdefault("last_files", {})[kind] = nxt
+            (self.audio if kind == "audio" else self.video).play()
+            if self.tab == kind:
+                self.refresh_lib_box()
+            self.toast(f"Next: {Path(nxt).name}")
 
     def open_path(self, path, remember=True):
         kind = kind_of(path)
@@ -816,6 +879,9 @@ class ViewerPage(QWidget):
         except Exception as e:
             QMessageBox.warning(self, "Can't open", f"Couldn't open {Path(path).name}:\n{e}")
             return False
+        if str(path) not in self.library[kind]:
+            self.library[kind].append(str(path))
+            self.save_library()
         if remember:
             self.main.profile.settings.setdefault("last_files", {})[kind] = str(path)
             self.main.profile.save()
@@ -834,21 +900,24 @@ class ViewerPage(QWidget):
         self.audio.setLoops(QMediaPlayer.Infinite if "sample_audio" in str(path) else 1)
         self.files["audio"] = str(path)
         self.audio_name.setText(f"🎵  {Path(path).name}")
+        if hasattr(self, "lib_box") and self.tab == "audio":
+            self.refresh_lib_box()
 
     def load_video(self, path):
         self.video.stop()
         self.video.setSource(QUrl.fromLocalFile(str(path)))
         self.files["video"] = str(path)
         self.video_name.setText(f"🎬  {Path(path).name}")
+        if hasattr(self, "lib_box") and self.tab == "video":
+            self.refresh_lib_box()
 
     def dragEnterEvent(self, e):
-        if e.mimeData().hasUrls() and any(kind_of(u.toLocalFile()) for u in e.mimeData().urls()):
+        if e.mimeData().hasUrls() and any(kind_of(u.toLocalFile()) or Path(u.toLocalFile()).is_dir()
+                                          for u in e.mimeData().urls()):
             e.acceptProposedAction()
 
     def dropEvent(self, e):
-        for u in e.mimeData().urls():
-            if kind_of(u.toLocalFile()):
-                self.open_path(u.toLocalFile())
+        self.open_paths([u.toLocalFile() for u in e.mimeData().urls()])
 
     # ---------- page life
     def apply_rates(self):
@@ -880,6 +949,12 @@ class ViewerPage(QWidget):
         s = self.main.profile.settings
         self.set_mode(s.get("action_input", "jaw"), announce=False)
         self.apply_rates()
+        saved = s.get("library") or {}
+        for kind in self.library:
+            keep = [f for f in saved.get(kind, []) if Path(f).exists()]
+            for f in keep:
+                if f not in self.library[kind]:
+                    self.library[kind].append(f)
         for kind, path in (s.get("last_files") or {}).items():
             if path and Path(path).exists() and path != self.files.get(kind):
                 self.open_path(path, remember=False)
@@ -963,6 +1038,7 @@ class ViewerPage(QWidget):
         self.seq_timer.stop()
         self.repeat_timer.stop()
         self.seq_n = 0
+        self.refresh_lib_box()
         if self.help.isVisible():
             self.help.set_tab(name, self.mode)
         self.send_targets()
