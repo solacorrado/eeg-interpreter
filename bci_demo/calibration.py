@@ -45,11 +45,11 @@ def _rest(inp, text, dur):
     return Step(inp, "rest", "rest", text, dur)
 
 
-def _trials(inp):
+def _trials(inp, ssvep_freqs=None):
     """(rest, action) pairs for one input, in a fixed order (build_calibration shuffles them)."""
     pairs = []
     if inp == "ssvep":
-        for f in SSVEP_FREQS * 2:
+        for f in list(ssvep_freqs or SSVEP_FREQS) * 2:
             pairs.append((_rest(inp, "Relax — look at the dot", 3),
                           Step(inp, "action", f"{f:g}", "Stare at the glowing circle", 6,
                                [("look", 5.6, 0.3, f)], flicker=f)))
@@ -83,22 +83,24 @@ def _trials(inp):
     return pairs
 
 
-def build_calibration(inputs, seed=None, randomize=True):
+def build_calibration(inputs, seed=None, randomize=True, ssvep_freqs=None, keep_order=False):
     """Calibration steps. With randomize (the default), the order of the input blocks and of
     the trials inside each block is shuffled, and every rest gets a random length (-20% to
     +30%), so the wearer can't anticipate cues and slow drift can't line up with one class.
     Each input stays in its own block so the instructions don't change every few seconds.
-    The same seed always gives the same order (it is saved with the trial)."""
+    The same seed always gives the same order (it is saved with the trial).
+    ssvep_freqs: only these flicker rates (e.g. the viewer's). keep_order: run the input blocks in
+    the order given (the trials inside each block are still shuffled)."""
     rng = random.Random(seed)
     blocks = []
     for inp in inputs:
-        pairs = _trials(inp)
+        pairs = _trials(inp, ssvep_freqs)
         if randomize:
             rng.shuffle(pairs)
             for rest, _ in pairs:
                 rest.dur = round(rest.dur * rng.uniform(0.8, 1.3), 1)
         blocks.append(pairs)
-    if randomize:
+    if randomize and not keep_order:
         rng.shuffle(blocks)
     # 20 s at the start: on a real headset the first ~1.5 min can be very noisy while the gel and
     # the wearer settle (seen in the first real session), so nothing is scored during that time.
@@ -305,8 +307,10 @@ def analyze_calibration(rows, cues):
             results.append(res)
 
     if "ssvep" in inputs:
-        cols = [f"ss_{f:g}" for f in SSVEP_FREQS]
-        for f in SSVEP_FREQS:
+        # score the rates that were actually tested (all 10, or just the viewer's in a quick calibration)
+        freqs = sorted({float(c["cls"]) for c in cues if c["input"] == "ssvep" and c["phase"] == "action"})
+        cols = [f"ss_{f:g}" for f in freqs]
+        for f in freqs:
             col, cls = f"ss_{f:g}", f"{f:g}"
             act = np.concatenate([_win(A, col, c["t_start"] + 2.0, c["t_end"] + 0.2)
                                   for c in by("ssvep", "action", cls)] or [np.array([])])
@@ -319,7 +323,7 @@ def analyze_calibration(rows, cues):
                 m = (A["t"] >= c["t_start"] + 2.0) & (A["t"] <= c["t_end"] + 0.2)
                 if all(k in A for k in cols) and m.any():
                     best = np.nanargmax(np.vstack([A[k][m] for k in cols]), axis=0)
-                    hits += int(np.sum(best == SSVEP_FREQS.index(f)))
+                    hits += int(np.sum(best == freqs.index(f)))
                     tot += int(m.sum())
             top = hits / tot if tot else 0.0
             # graded on: does THIS rate's signal clearly rise when stared at? (the head-to-head

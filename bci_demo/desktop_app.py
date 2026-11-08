@@ -1317,12 +1317,16 @@ class CalibPage(QWidget):
         self.total = QLabel(objectName="hint")
         lv.addWidget(self.total)
         lv.addSpacing(8)
-        self.btn_cal = QPushButton("Start calibration", objectName="primary")
+        self.btn_quick = QPushButton("⚡ Quick: flicker · blink · jaw", objectName="primary")
+        self.btn_quick.setToolTip("Only the flicker rates the viewer uses, then blinks, then jaw clench, "
+                                  "in that order (about 4 min with the voice)")
+        self.btn_quick.clicked.connect(self.start_quick)
+        self.btn_cal = QPushButton("Full calibration (ticked inputs)")
         self.btn_redo = QPushButton("Redo Poor inputs only")
         self.btn_redo.setToolTip("Tick only the inputs whose latest calibration had a Poor result, then calibrate them")
         self.btn_test = QPushButton("Run live test")
         self.btn_stop = QPushButton("Stop")
-        for b in (self.btn_cal, self.btn_redo, self.btn_test, self.btn_stop):
+        for b in (self.btn_quick, self.btn_cal, self.btn_redo, self.btn_test, self.btn_stop):
             b.setFocusPolicy(Qt.NoFocus)
             lv.addWidget(b)
         self.btn_cal.clicked.connect(lambda: self.start_session("calibration"))
@@ -1442,11 +1446,13 @@ class CalibPage(QWidget):
         self.btn_cal.setEnabled(bool(inputs) and not self.rec)
         self.btn_test.setEnabled(bool(inputs) and not self.rec)
         self.btn_redo.setEnabled(bool(self.poor_inputs()) and not self.rec)
+        self.btn_quick.setEnabled(not self.rec)
 
     def poor_inputs(self):
         """Inputs whose most recent CALIBRATION had any Poor item."""
         return sorted({r["input"] for r in self.main.profile.calibration.values()
-                       if r.get("kind") == "calibration" and r.get("verdict") == "Poor" and r.get("input") in C.INPUTS})
+                       if r.get("kind", "").startswith("calibration") and "partial" not in r.get("kind", "")
+                       and r.get("verdict") == "Poor" and r.get("input") in C.INPUTS})
 
     def redo_poor(self):
         poor = self.poor_inputs()
@@ -1464,23 +1470,34 @@ class CalibPage(QWidget):
             self.canvas.update()
 
     # ---------- running a session
-    def start_session(self, kind):
+    def viewer_rates(self):
+        return sorted({float(f) for f in self.main.profile.settings.get("viewer_rates", {}).values()})
+
+    def start_quick(self):
+        """Only what the viewer uses: its flicker rates, then blinks, then jaw, in that order."""
+        for k, cb in self.checks.items():
+            cb.setChecked(k in ("ssvep", "blink", "jaw"))
+        self.start_session("calibration", quick=True)
+
+    def start_session(self, kind, quick=False):
         eng = self.main.engine
         if not eng.status.get("connected"):
             QMessageBox.warning(self, "No headset", "Connect a headset on the start screen first.")
             return
-        inputs = self.selected()
-        self.kind = kind
+        inputs = ["ssvep", "blink", "jaw"] if quick else self.selected()
+        self.kind, self.quick = kind, quick
         self.seed = random.randrange(1_000_000)  # saved with the trial, so the order can be reproduced
-        self.steps = (C.build_calibration(inputs, seed=self.seed) if kind == "calibration"
-                      else C.build_test(inputs, reps=3, seed=self.seed))
+        freqs = self.viewer_rates() if quick else C.SSVEP_FREQS
+        self.steps = (C.build_calibration(inputs, seed=self.seed, ssvep_freqs=freqs, keep_order=quick)
+                      if kind == "calibration" else C.build_test(inputs, reps=3, seed=self.seed))
         self.total_s = C.total_seconds(self.steps)
-        self.rec = TrialRecorder(kind, self.main.profile.name, eng.info)
-        eng.set_freqs(C.SSVEP_FREQS)
+        self.rec = TrialRecorder(f"{kind}_quick" if quick else kind, self.main.profile.name, eng.info)
+        eng.set_freqs(freqs)
         eng.set_recorder(self.rec)
         self.i, self.cur_t0, self.elapsed_before = -1, None, 0.0
         self.voice_warning = ""
-        for b, on in ((self.btn_cal, False), (self.btn_redo, False), (self.btn_test, False), (self.btn_stop, True)):
+        for b, on in ((self.btn_quick, False), (self.btn_cal, False), (self.btn_redo, False), (self.btn_test, False),
+                      (self.btn_stop, True)):
             b.setEnabled(on)
         for cb in self.checks.values():
             cb.setEnabled(False)
@@ -1614,6 +1631,7 @@ class CalibPage(QWidget):
         if kind == "calibration":
             results, update = C.analyze_calibration(rows, cues)
             folder = rec.save(results, {"inputs": self.selected(), "seed": self.seed, "randomized": True,
+                                        "quick": getattr(self, "quick", False),
                                         "partial": partial, "settings_used": dict(prof.settings)})
             prof.record(rec.kind, results, folder, None if partial else update)
             note = ("Partial session: scores saved, settings NOT changed." if partial else
