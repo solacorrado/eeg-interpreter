@@ -1,0 +1,172 @@
+{
+  "meta": {
+    "kind": "calibration_quick",
+    "profile": "wearer1",
+    "started": "2026-11-08T10:35:43",
+    "app_version": "0.4.0",
+    "stream": "EE511-010009-200205_on_DESKTOP-58HRJR3",
+    "rate": 500.0,
+    "channels": [
+      "Fp1",
+      "Fp2",
+      "F9",
+      "F7",
+      "F3",
+      "Fz",
+      "F4",
+      "F8",
+      "F10",
+      "T9",
+      "T7",
+      "C3",
+      "C4",
+      "T8",
+      "T10",
+      "P9",
+      "P7",
+      "P3",
+      "Pz",
+      "P4",
+      "P8",
+      "P10",
+      "O1",
+      "O2",
+      "Trigger"
+    ],
+    "duration_s": 271.1,
+    "samples": 135556,
+    "inputs": [
+      "ssvep",
+      "jaw",
+      "blink"
+    ],
+    "seed": 173515,
+    "randomized": true,
+    "quick": true,
+    "partial": false,
+    "settings_used": {
+      "ssvep_thr": {
+        "12": 0.351,
+        "13": 0.394,
+        "14": 0.329,
+        "15": 0.386,
+        "8": 0.38,
+        "9": 0.388,
+        "10": 0.393,
+        "11": 0.394,
+        "17": 0.304,
+        "19": 0.3
+      },
+      "ssvep_margin": 0.08,
+      "jaw_factor": 4.77,
+      "hold_s": 1.0,
+      "brow_factor": 5.0,
+      "blink_z": 7.76,
+      "blink_sign": -1,
+      "glance_left_z": 4.0,
+      "glance_right_z": 4.0,
+      "heog_sign": 1,
+      "alpha_factor": 5.44,
+      "fist_right_ratio": 0.69,
+      "fist_left_ratio": 0.6,
+      "flicker_strength": 0.6,
+      "flicker_style": "glow",
+      "viewer_rates": {
+        "up": 13,
+        "right": 9,
+        "down": 15,
+        "left": 11,
+        "back": 9,
+        "fwd": 13
+      },
+      "last_files": {},
+      "library": {},
+      "action_input": "jaw",
+      "eyeroll_z": 7.55
+    }
+  },
+  "results": [
+    {
+      "key": "jaw",
+      "input": "jaw",
+      "item": "Jaw clench",
+      "accuracy": 1.0,
+      "verdict": "Good",
+      "threshold": 75.76,
+      "detail": "clench 3077.2× vs rest 1.6×",
+      "settings": {
+        "jaw_factor": 75.76,
+        "hold_s": 1.0
+      }
+    },
+    {
+      "key": "blink",
+      "input": "blink",
+      "item": "Blink",
+      "accuracy": 1.0,
+      "verdict": "Good",
+      "threshold": 7.67,
+      "detail": "blink 13 vs rest 1 (noise units)",
+      "settings": {
+        "blink_z": 7.67,
+        "blink_sign": -1
+      }
+    },
+    {
+      "key": "ssvep_9",
+      "input": "ssvep",
+      "item": "Flicker 9 Hz",
+      "accuracy": 0.851,
+      "verdict": "OK",
+      "threshold": 0.412,
+      "detail": "stare 0.47 vs not 0.32; top of all rates 93%",
+      "settings": {
+        "ssvep_thr": {
+          "9": 0.412
+        }
+      }
+    },
+    {
+      "key": "ssvep_11",
+      "input": "ssvep",
+      "item": "Flicker 11 Hz",
+      "accuracy": 0.931,
+      "verdict": "Good",
+      "threshold": 0.451,
+      "detail": "stare 0.55 vs not 0.32; top of all rates 97%",
+      "settings": {
+        "ssvep_thr": {
+          "11": 0.451
+        }
+      }
+    },
+    {
+      "key": "ssvep_13",
+      "input": "ssvep",
+      "item": "Flicker 13 Hz",
+      "accuracy": 0.994,
+      "verdict": "Good",
+      "threshold": 0.463,
+      "detail": "stare 0.57 vs not 0.30; top of all rates 100%",
+      "settings": {
+        "ssvep_thr": {
+          "13": 0.463
+        }
+      }
+    },
+    {
+      "key": "ssvep_15",
+      "input": "ssvep",
+      "item": "Flicker 15 Hz",
+      "accuracy": 1.0,
+      "verdict": "Good",
+      "threshold": 0.429,
+      "detail": "stare 0.58 vs not 0.26; top of all rates 100%",
+      "settings": {
+        "ssvep_thr": {
+          "15": 0.429
+        }
+      }
+    }
+  ]
+}

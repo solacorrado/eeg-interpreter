@@ -1,15 +1,17 @@
 # Recordings
 
 Real EEG sessions recorded with the Hands-Free Viewer app at the Neurotech @ NC State BCI
-Hackathon (7 Nov 2026), on ANT Neuro's eego amplifier and 24-electrode cap, streamed over LSL.
+Hackathon (7–8 Nov 2026), on ANT Neuro's eego amplifier and 24-electrode cap, streamed over LSL.
 Both wearers agreed to share their data; names are replaced with `wearer1` / `wearer2`.
 
 | Folder | Length | What it is |
 |---|---|---|
 | `wearer1/20261107-164627_calibration/` | 7.5 min | full randomized calibration of every input (no spoken cues yet; the first ~90 s are very noisy) |
+| `wearer1/20261107-202648_calibration_quick/` | 4.6 min | quick calibration: the viewer's four flicker rates (9, 11, 13, 15 Hz), blink, jaw |
+| `wearer1/20261108-103543_calibration_quick/` | 4.5 min | the same quick calibration the next morning, through a different ANT laptop |
 | `wearer2/20261107-171911_calibration/` | 12.3 min | full randomized calibration of every input, with spoken cues |
 
-Both: **500 Hz, 25 channels, no gaps.** Channel order:
+All: **500 Hz, 25 channels, no gaps.** Channel order:
 
 ```
 Fp1 Fp2 F9 F7 F3 Fz F4 F8 F10 T9 T7 C3 C4 T8 T10 P9 P7 P3 Pz P4 P8 P10 O1 O2 Trigger
@@ -68,6 +70,24 @@ Balanced accuracy separating "doing it" from "resting": Good ≥ 90%, OK ≥ 75%
 ¹ wearer1's blink, glance and eyebrow blocks fell in the very noisy first ~90 s, before spoken
 cues existed, and the wearer couldn't see the cues, so those scores say little about the inputs.
 ² high even when not staring: the person's natural ~10 Hz alpha rhythm, so these rates may fire falsely.
+
+### wearer1 again: same person, three sessions over two days
+
+The viewer's inputs, scored with the current code in each session:
+
+| Input | Nov 7, 4:46 PM (full) | Nov 7, 8:26 PM (quick) | Nov 8, 10:35 AM (quick) |
+|---|---|---|---|
+| Jaw clench | 100% | 92% | 100% |
+| Blink | 56%¹ | 100% | 88% |
+| Flicker 9 Hz | 98% | 90% | 87% |
+| Flicker 11 Hz | 92% | 84% | 86% |
+| Flicker 13 Hz | 100% | 87% | 100% |
+| Flicker 15 Hz | 95% | 85% | 99% |
+
+Jaw and every viewer flicker rate stayed at 84–100% across all three sessions, including the next
+day on a different laptop. (A 10:20 AM attempt on Nov 8 scored poorly on everything because the O1
+and T7 channels were far noisier than normal, a sign of poor electrode contact; 15 minutes later the
+10:35 AM session above was the best yet. It is not included.)
 
 **Takeaways:** flicker at 11–15 Hz, jaw clench and eyes closed worked for both people. Blink and
 glance worked for wearer2 once the headset had settled and cues were spoken. Rates near 10 Hz
