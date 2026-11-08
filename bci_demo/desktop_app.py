@@ -52,13 +52,16 @@ from storage import Profile, TrialRecorder, data_dir, list_profiles, load_state,
 from version import APP_VERSION
 
 HERE = Path(__file__).parent
-# Design tokens, from the team palette: charcoal #2C2B30, graphite #4F4F51, light grey #D6D6D6,
-# blush #F2C4CE and coral #F58F7C. Panels are small steps between charcoal and graphite. The flicker
-# targets stay white glows (the brightest thing on screen) with coral arrows.
+# Design tokens. Grey base: charcoal #2C2B30, graphite #4F4F51, light grey #D6D6D6 (panels are small
+# steps between charcoal and graphite). Accents: vermilion #C7351D (buttons, active tab, arrows),
+# burgundy #6C0F0B (soft accent backgrounds: badges, selected states) and cream #F5E2BD (headings,
+# text on buttons). Small vermilion-coloured text uses a lighter tint (ACCENT_TEXT) so it stays
+# readable on charcoal. The flicker targets stay white glows (the brightest thing on screen).
 BG, PANEL, PANEL2, LINE, TEXT, MUTED = "#2C2B30", "#333238", "#3A393F", "#4F4F51", "#D6D6D6", "#9C9AA2"
-ACCENT, WARN, BAD, ARROW = "#F58F7C", "#F2C27C", "#E8606F", "#F58F7C"
+ACCENT, WARN, BAD, ARROW = "#C7351D", "#F2C27C", "#E8606F", "#C7351D"
 GOOD = "#8FD1A4"
-ACCENT_SOFT, ACCENT_HI, ON_ACCENT = "#4A3A3D", "#F2C4CE", "#2C2B30"
+ACCENT_SOFT, ACCENT_HI, ON_ACCENT = "#6C0F0B", "#DA4A2F", "#F5E2BD"
+ACCENT_TEXT, CREAM = "#EE7458", "#F5E2BD"
 # Atkinson Hyperlegible: made by the Braille Institute for low-vision readers. IBM Plex Mono: readouts.
 FONT, FONT_DISPLAY, MONO = "Atkinson Hyperlegible", "Atkinson Hyperlegible", "IBM Plex Mono"
 VERDICT_COLOR = {"Good": GOOD, "OK": WARN, "Poor": BAD}
@@ -76,11 +79,11 @@ QToolTip {{ background:{PANEL2}; color:{TEXT}; border:1px solid {LINE}; padding:
 QPushButton {{ background:{PANEL2}; border:1px solid {LINE}; color:{TEXT}; padding:8px 16px; border-radius:8px; }}
 QPushButton:hover {{ background:#444349; border-color:#6A6A6E; }}
 QPushButton:pressed {{ background:#262529; }}
-QPushButton:checked {{ background:{ACCENT_SOFT}; border-color:{ACCENT}; color:#F2C4CE; }}
+QPushButton:checked {{ background:{ACCENT_SOFT}; border-color:{ACCENT}; color:#F5E2BD; }}
 QPushButton:disabled {{ color:#6E6D73; background:#303034; border-color:#3E3E42; }}
 QPushButton#primary {{ background:{MINT_GRADIENT}; color:{ON_ACCENT}; border:none; font-weight:700; padding:10px 18px; }}
 QPushButton#primary:hover {{ background:{ACCENT_HI}; }}
-QPushButton#primary:pressed {{ background:#E07A67; }}
+QPushButton#primary:pressed {{ background:#A82A16; }}
 QPushButton#primary:disabled {{ background:#3A393F; color:#6E6D73; }}
 QComboBox {{ background:{PANEL2}; border:1px solid {LINE}; border-radius:10px; padding:7px 12px; }}
 QComboBox:hover {{ border-color:#6A6A6E; }}
@@ -89,7 +92,7 @@ QComboBox QAbstractItemView {{ background:{PANEL2}; border:1px solid {LINE}; sel
                                selection-color:{TEXT}; outline:none; padding:4px; }}
 QSlider::groove:horizontal {{ height:6px; background:{PANEL2}; border-radius:3px; }}
 QSlider::sub-page:horizontal {{ background:{MINT_GRADIENT}; border-radius:3px; }}
-QSlider::handle:horizontal {{ background:#F2C4CE; border:2px solid {ACCENT}; width:14px; margin:-6px 0; border-radius:9px; }}
+QSlider::handle:horizontal {{ background:#F5E2BD; border:2px solid {ACCENT}; width:14px; margin:-6px 0; border-radius:9px; }}
 QProgressBar {{ background:{PANEL2}; border:none; border-radius:4px; max-height:8px; text-align:center; }}
 QProgressBar::chunk {{ background:{MINT_GRADIENT}; border-radius:4px; }}
 QTabWidget::pane {{ border:1px solid {LINE}; border-radius:14px; background:{PANEL}; top:-1px; }}
@@ -101,7 +104,7 @@ QTableWidget {{ background:{PANEL}; alternate-background-color:{PANEL2}; gridlin
 QHeaderView::section {{ background:{PANEL}; color:{MUTED}; border:none; border-bottom:1px solid {LINE}; padding:6px;
                         font-weight:600; }}
 QScrollBar:vertical {{ background:transparent; width:10px; margin:2px; }}
-QScrollBar::handle:vertical {{ background:#5A5A5E; border-radius:4px; min-height:30px; }}
+QScrollBar::handle:vertical {{ background:#5C5B61; border-radius:4px; min-height:30px; }}
 QScrollBar::add-line, QScrollBar::sub-line {{ height:0; width:0; }}
 QCheckBox {{ spacing:10px; }}
 QRadioButton {{ spacing:10px; }}
@@ -113,25 +116,25 @@ QCheckBox::indicator:hover, QRadioButton::indicator:hover {{ border-color:{ACCEN
 QCheckBox::indicator:disabled {{ border-color:{LINE}; }}
 #toast {{ background:rgba(51, 50, 56, 245); border:1px solid {ACCENT}; border-radius:14px; padding:10px 22px;
           font-size:13pt; color:{TEXT}; }}
-#big_icon {{ font-size:54pt; color:{ACCENT}; background:{ACCENT_SOFT}; border:2px solid {ACCENT};
+#big_icon {{ font-size:54pt; color:{ACCENT_TEXT}; background:{ACCENT_SOFT}; border:2px solid {ACCENT};
              border-radius:90px; min-width:180px; max-width:180px; min-height:180px; max-height:180px; }}
 #hint {{ color:{MUTED}; background:transparent; }}
-#h1 {{ font-family:"{FONT_DISPLAY}", "Segoe UI"; font-size:26pt; font-weight:700; background:transparent; }}
+#h1 {{ font-family:"{FONT_DISPLAY}", "Segoe UI"; font-size:26pt; font-weight:700; color:{CREAM}; background:transparent; }}
 #h2 {{ font-family:"{FONT_DISPLAY}", "Segoe UI"; font-size:13pt; font-weight:600; background:transparent; }}
-#panel #badge, #badge {{ background:{ACCENT_SOFT}; color:{ACCENT}; border-radius:14px; font-weight:700; font-size:11pt;
+#panel #badge, #badge {{ background:{ACCENT_SOFT}; color:{CREAM}; border-radius:14px; font-weight:700; font-size:11pt;
           min-width:28px; max-width:28px; min-height:28px; max-height:28px; }}
 #bar #pill, #pill {{ background:{PANEL2}; border:1px solid {LINE}; border-radius:14px; padding:5px 14px;
           font-family:"{MONO}", "Cascadia Mono", monospace; font-size:9.5pt; }}
 #card {{ background:{PANEL}; border:1px solid {LINE}; border-radius:14px; }}
-#card:hover {{ border:1px solid {ACCENT}; background:#3B3437; }}
-#cardkicker {{ color:{ACCENT}; font-family:"{MONO}", monospace; font-size:9pt; letter-spacing:1.5px; }}
+#card:hover {{ border:1px solid {ACCENT}; background:#3A2628; }}
+#cardkicker {{ color:{ACCENT_TEXT}; font-family:"{MONO}", monospace; font-size:9pt; letter-spacing:1.5px; }}
 #chip {{ background:{PANEL2}; border:1px solid {LINE}; border-radius:13px; padding:4px 12px; font-size:10.5pt; }}
 #card QLabel {{ background:transparent; }}
-#cardtitle {{ font-family:"{FONT_DISPLAY}", "Segoe UI"; font-size:21pt; font-weight:700; }}
+#cardtitle {{ font-family:"{FONT_DISPLAY}", "Segoe UI"; font-size:21pt; font-weight:700; color:{CREAM}; }}
 #cardicon {{ font-size:22pt; color:{ACCENT}; border:1.5px solid {ACCENT}; border-radius:28px;
               min-width:56px; max-width:56px; min-height:56px; max-height:56px; qproperty-alignment:AlignCenter; }}
 #carddesc {{ color:{MUTED}; font-size:11pt; }}
-#cardarrow {{ color:{ACCENT}; font-size:26pt; font-weight:700; }}
+#cardarrow {{ color:{ACCENT_TEXT}; font-size:26pt; font-weight:700; }}
 """
 
 
@@ -247,7 +250,7 @@ class SignalStrip(QWidget):
         lo, hi = math.log10(0.3), math.log10(300.0)
         pts = [QPointF(inner.left() + step * (i + n - len(self.vals)),
                        inner.bottom() - inner.height() * (v - lo) / (hi - lo)) for i, v in enumerate(self.vals)]
-        col = QColor(WARN if self.clenching else ACCENT)
+        col = QColor(WARN if self.clenching else ACCENT_TEXT)
         fill = QLinearGradient(0, inner.top(), 0, inner.bottom())
         c1, c2 = QColor(col), QColor(col)
         c1.setAlpha(70)
@@ -289,12 +292,12 @@ class SignalStrip(QWidget):
         n = self.vals.maxlen
         pts = [QPointF(inner.left() + inner.width() * (i + n - len(self.vals)) / (n - 1),
                        inner.bottom() - inner.height() * (v - lo) / (hi - lo)) for i, v in enumerate(self.vals)]
-        pen = QPen(QColor(WARN if self.clenching else ACCENT), 1.6)
+        pen = QPen(QColor(WARN if self.clenching else ACCENT_TEXT), 1.6)
         pen.setJoinStyle(Qt.RoundJoin)
         p.setPen(pen)
         p.drawPolyline(QPolygonF(pts))
         p.setPen(Qt.NoPen)
-        p.setBrush(QColor(WARN if self.clenching else ACCENT))
+        p.setBrush(QColor(WARN if self.clenching else ACCENT_TEXT))
         p.drawEllipse(pts[-1], 2.6, 2.6)
 
 
@@ -363,7 +366,7 @@ class FlickerTarget(QWidget):
             p.restore()
         if now < self.hit_until:  # selected: an accent ring (glow) or outline (box)
             p.setPen(QPen(QColor(ACCENT), 3))
-            p.setBrush(QColor(245, 143, 124, 45))
+            p.setBrush(QColor(199, 53, 29, 70))
             if Flicker.style == "box":
                 p.drawRoundedRect(r, 18, 18)
             else:
@@ -668,8 +671,8 @@ class HelpOverlay(QFrame):
             HelpOverlay {{ background: rgba(24, 23, 27, 225); }}
             #helpcard {{ background:{PANEL}; border:1px solid {LINE}; border-radius:18px; }}
             #helpcard QLabel {{ background:transparent; }}
-            #helptitle {{ font-family:"{FONT_DISPLAY}", "Segoe UI"; font-size:20pt; font-weight:700; }}
-            #helpicon {{ font-family:"{MONO}"; font-size:15pt; color:{ACCENT}; border:1.5px solid {LINE};
+            #helptitle {{ font-family:"{FONT_DISPLAY}", "Segoe UI"; font-size:20pt; font-weight:700; color:{CREAM}; }}
+            #helpicon {{ font-family:"{MONO}"; font-size:15pt; color:{ACCENT_TEXT}; border:1.5px solid {LINE};
                          border-radius:20px; min-width:40px; max-width:40px; min-height:40px; max-height:40px;
                          qproperty-alignment:AlignCenter; }}
             #helpdo {{ font-size:14pt; font-weight:600; color:{TEXT}; }}
@@ -1523,7 +1526,7 @@ class CueCanvas(QWidget):
         p.drawRoundedRect(r, 18, 18)
         c = QPointF(r.center().x(), r.center().y() + 30)
         active = self.phase in ("rest", "action", "settle") and not self.listening
-        color = QColor(ACCENT if self.phase == "action" else MUTED)
+        color = QColor(ACCENT_TEXT if self.phase == "action" else MUTED)
 
         # the cue: flicker circle, or a dot to look at
         rad = min(r.width(), r.height()) * 0.2
@@ -1568,7 +1571,7 @@ class CueCanvas(QWidget):
             p.setFont(QFont(FONT, 9, QFont.Bold))
             w = p.fontMetrics().horizontalAdvance(chip) + 28
             cr = QRectF(r.center().x() - w / 2, 26, w, 26)
-            chip_color = QColor(ACCENT if (self.phase == "action" and not self.listening) else "#F2C4CE" if self.listening else MUTED)
+            chip_color = QColor(ACCENT_TEXT if (self.phase == "action" and not self.listening) else "#F5E2BD" if self.listening else MUTED)
             fill = QColor(chip_color)
             fill.setAlpha(36)
             p.setPen(QPen(chip_color, 1))
@@ -1578,7 +1581,7 @@ class CueCanvas(QWidget):
             p.drawText(cr, Qt.AlignCenter, chip)
 
         # instruction
-        p.setPen(QColor(ACCENT if (self.phase == "action" and not self.listening) else TEXT))
+        p.setPen(QColor(ACCENT_TEXT if (self.phase == "action" and not self.listening) else TEXT))
         p.setFont(QFont(FONT_DISPLAY, 24 if self.phase == "action" else 20, QFont.Bold))
         p.drawText(QRectF(40, 64, r.width() - 80, 100), Qt.AlignHCenter | Qt.AlignTop | Qt.TextWordWrap, self.text)
         p.setPen(QColor(MUTED))
@@ -1650,7 +1653,7 @@ class MeterPanel(QWidget):
                     over = v <= thrs[0]
                 else:
                     over = v >= thrs[0]
-                p.setBrush(QColor(ACCENT if over else "#5F5E64"))
+                p.setBrush(QColor(ACCENT if over else "#5C5B61"))
                 p.drawRoundedRect(QRectF(min(zero, xv), y + 7, max(2.0, abs(xv - zero)), 6), 3, 3)
                 p.setPen(QColor(TEXT))
                 p.drawText(QRectF(x0 + w + 6, y, 54, 20), Qt.AlignVCenter | Qt.AlignLeft,
