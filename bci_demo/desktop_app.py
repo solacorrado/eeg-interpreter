@@ -668,6 +668,7 @@ class ViewerPage(QWidget):
 
     def activate(self):
         s = self.main.profile.settings
+        self.main.engine.set_inputs({"jaw", "ssvep"})  # the viewer only uses flicker + jaw
         self.apply_rates()
         for kind, path in (s.get("last_files") or {}).items():
             if path and Path(path).exists() and path != self.files.get(kind):
@@ -683,6 +684,7 @@ class ViewerPage(QWidget):
         self.set_tab(self.tab)
 
     def deactivate(self):
+        self.main.engine.set_inputs(None)
         self.audio.pause()
         self.video.pause()
         self.single_timer.stop()
@@ -1258,6 +1260,7 @@ class CalibPage(QWidget):
         self.auto.setVisible(fake)
         self.fake_help.setVisible(fake)
         self.main.engine.set_freqs(C.SSVEP_FREQS)
+        self.main.engine.set_inputs(None)  # calibration and the live test use every input
         self.profile_label.setText(f"Profile: <b>{self.main.profile.name}</b><br>"
                                    f"Every session is saved as a trial in the {data_dir().name} folder")
         if not self.rec:

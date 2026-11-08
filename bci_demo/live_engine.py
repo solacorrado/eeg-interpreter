@@ -25,6 +25,7 @@ class LiveEngine:
         self.lock = threading.Lock()
         self.settings = dict(settings)
         self.freqs = []
+        self.enabled = None  # inputs the current screen uses (None = all)
         self.recorder = None
         self.gestures = None
         self.thread = None
@@ -54,6 +55,13 @@ class LiveEngine:
             self.settings = dict(settings)
             if self.gestures:
                 self.gestures.apply(settings)
+
+    def set_inputs(self, names):
+        """Only detect these inputs (e.g. {"jaw", "ssvep"} in the viewer); None = all."""
+        with self.lock:
+            self.enabled = set(names) if names else None
+            if self.gestures:
+                self.gestures.enabled = self.enabled
 
     def set_freqs(self, freqs):
         with self.lock:
@@ -113,7 +121,7 @@ class LiveEngine:
         self.info = {"name": info.name(), "rate": rate, "channels": names, "type": info.type(),
                      "names_from_stream": any(raw_names)}
         self.reconnect_name = info.name()
-        pipe = Pipeline(rate, names, self.settings)
+        pipe = Pipeline(rate, names, self.settings, self.enabled)
         self.status.update(connected=True, stream=info.name(), stream_type=info.type(), rate=rate, n_channels=n,
                            names_from_stream=any(raw_names), missing=pipe.fx.missing)
         print(f"Connected to {info.name()!r}: {n} ch @ {rate} Hz; channels: {', '.join(names)}")
@@ -157,10 +165,10 @@ class Pipeline:
     """Raw EEG chunks -> feature rows + events. Used live (LiveEngine) and offline
     (reanalyze.py), so re-analysing a saved trial gives exactly what the app saw."""
 
-    def __init__(self, rate, names, settings):
+    def __init__(self, rate, names, settings, enabled=None):
         self.fx = FeatureExtractor(rate, names)
         self.ss = SSVEPScorer(rate, names)
-        self.gestures = Gestures(settings)
+        self.gestures = Gestures(settings, enabled)
         self.scores = {}
         self.last_ss = -1e9
 

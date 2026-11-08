@@ -24,8 +24,11 @@ class _EMG:
 
 
 class Gestures:
-    def __init__(self, settings):
+    def __init__(self, settings, enabled=None):
         self.s = dict(settings)
+        # which inputs the current screen uses (None = all). Unused inputs are not detected, so e.g.
+        # an eyebrow detector can't "steal" jaw clenches on a screen that only uses the jaw.
+        self.enabled = set(enabled) if enabled else None
         self.jaw, self.brow = _EMG(), _EMG()
         self.blink_on, self.blink_t0, self.last_blink = False, 0.0, -1e9
         self.glance = {"left": {"above": 0, "armed": True, "block": -1e9},
@@ -36,6 +39,9 @@ class Gestures:
 
     def apply(self, settings):
         self.s = dict(settings)
+
+    def on(self, name):
+        return self.enabled is None or name in self.enabled
 
     # ------------------------------------------------------------------ per feature row
     def update(self, row):
@@ -50,9 +56,12 @@ class Gestures:
 
     def _emg(self, row, t):
         s, ev = self.s, []
-        jv, bv = row["jaw"] / s["jaw_factor"], row["brow"] / s["brow_factor"]  # >1 = over threshold
+        jv = row["jaw"] / s["jaw_factor"] if self.on("jaw") else 0.0  # >1 = over threshold
+        bv = row["brow"] / s["brow_factor"] if self.on("brow") else 0.0
         for m, val, other, other_m, name in ((self.jaw, jv, bv, self.brow, "jaw"),
                                              (self.brow, bv, jv, self.jaw, "brow")):
+            if not self.on(name) and not m.active:
+                continue
             if not m.active:
                 # whichever muscle is further over its own threshold wins
                 m.above = m.above + 1 if (val >= 1 and val >= other) else 0
