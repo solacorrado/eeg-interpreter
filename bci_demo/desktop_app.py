@@ -313,6 +313,7 @@ TABS = ["pdf", "audio", "video"]
 TAB_ACTS = {"pdf": ["up", "right", "down", "left"], "audio": [], "video": ["back", "fwd"]}
 PDF_KEYS = {Qt.Key_Up: "up", Qt.Key_Right: "right", Qt.Key_Down: "down", Qt.Key_Left: "left"}
 VIDEO_KEYS = {Qt.Key_Left: "back", Qt.Key_Right: "fwd"}
+TAB_KEYS = {Qt.Key_1: "pdf", Qt.Key_2: "audio", Qt.Key_3: "video"}
 DOUBLE_MS, HOLD_MS, ZOOM_IN = 1500, 1000, 2.5
 SEQ_GAP_MS = 1000  # Listen/Watch: how long to wait for another clench before acting
 
@@ -622,7 +623,8 @@ HELP_COMMON = [
     ("📂", "Open files (or drag files / a folder onto the window)",
      "Bring in as many PDFs, audio files and videos as you like; pick one from the list at the top. "
      "Audio and video move on to the next file by themselves."),
-    ("⌨", "Keyboard backup", "Arrow keys = look at an arrow · J = jaw (tap 1, 2 or 3 times; hold)."),
+    ("⌨", "Keyboard backup", "1 / 2 / 3 = Read / Listen / Watch · Arrow keys = look at an arrow · "
+                                 "J = jaw (tap 1, 2 or 3 times; hold)."),
 ]
 
 
@@ -1367,6 +1369,10 @@ class ViewerPage(QWidget):
         if self.help.isVisible() and key in (Qt.Key_Escape, Qt.Key_Return, Qt.Key_Enter, Qt.Key_Space):
             if press:
                 self.show_help(False)
+            return True
+        if key in TAB_KEYS:  # 1 / 2 / 3 = Read / Listen / Watch
+            if press and not repeat and TAB_KEYS[key] != self.tab:
+                self.set_tab(TAB_KEYS[key])
             return True
         fake = self.main.fake if self.main.engine.status.get("fake") else None
         via_eeg = fake is not None and bool(e.modifiers() & Qt.ShiftModifier)

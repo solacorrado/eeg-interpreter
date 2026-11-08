@@ -63,6 +63,7 @@ The flicker rates are the best well-spaced rates from the real session; each pro
   every clench was read as an eyebrow raise.
 - `J` behaves like your jaw: tap = clench, two quick taps = double clench, hold 1 s = held clench.
   The keyboard and big buttons always work, so a live demo still runs if the EEG is noisy.
+- `1` / `2` / `3` switch between **Read**, **Listen** and **Watch**.
 
 ## Setup
 
