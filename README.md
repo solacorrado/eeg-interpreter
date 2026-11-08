@@ -16,7 +16,7 @@ eego headset ──LSL──▶ server.py ──▶ look detector  (O1, Oz, O2, 
  24 ch, 500 Hz                  └─▶ jaw detector   (T7, T8, M1, M2)  ──┴─▶ web page (localhost:8780)
 ```
 
-- **Look (SSVEP):** each arrow pulses at its own rate (12–15 times a second). Staring at
+- **Look (SSVEP):** each arrow pulses at its own rate (8–19 times a second). Staring at
   one makes the visual cortex echo that rate. Every 0.25 s the app compares the last
   2 s of the back-of-head channels with sine waves at each arrow's rate (canonical
   correlation analysis, CCA). The same winner 3 times in a row counts as a press.
@@ -26,16 +26,41 @@ eego headset ──LSL──▶ server.py ──▶ look detector  (O1, Oz, O2, 
 - The arrows are **soft Gaussian glows** with a strength slider, which is easier on the
   eyes than hard flashing boxes. Lower strength is gentler but gives a weaker brain signal.
 
+## Results on a real brain
+
+First real session (wearer "Sola", ANT eego 24-channel cap, 500 Hz, 7.6 min):
+
+| Signal | Result | Used in the viewer |
+|---|---|---|
+| **Flicker (SSVEP)** | 88–100% at all 10 rates tested (8–19 Hz); **8/8** correct arrows on the PDF tab and **4/4** on the video tab in replay, **0 wrong arrows**, ~1–1.5 s to trigger | ✅ arrows |
+| **Jaw clench** | 100% in calibration; **6/6** in replay, 0.4–1.4 s after the cue | ✅ actions |
+| **Eyes closed** | 100% in calibration; 3/4 in replay, 0.3 false alarms/min | candidate "rest" control |
+| Fist squeeze | right 81% in calibration, but the live detector never fired on it | ✗ |
+| Blink / glance / eyebrows | not testable in that session (recorded in a very noisy first 90 s, before spoken cues existed) | ✗ untested |
+
+Replaying her recording over LSL into the real app: staring at 11 Hz scrolled left, 13 Hz scrolled
+up, the unused rates (10, 17, 19 Hz) fired nothing, and all 6 clenches toggled video play/pause.
+
+Blink findings from the same data: she blinked naturally 12.6×/min and double-blinked naturally
+2–3×/min, so single and double blinks can't be controls; natural *triple* blinks: 0 in 6 min.
+
 ## Controls
 
-| Tab   | Look at an arrow | Jaw | Keyboard backup |
-|-------|------------------|-----|-----------------|
-| PDF   | ▲ 12 Hz, ▶ 13 Hz, ▼ 14 Hz, ◀ 15 Hz to scroll. Scrolling past the edge turns the page | **Double clench:** arrows on/off. **Hold ~1 s:** zoom in/out | Arrow keys; `J` tap twice / hold |
-| Audio | none | **Double clench:** play/pause. **Single clench:** back 15 s | `J` tap twice / tap once |
-| Video | ⏪ 12 Hz back 15 s, ⏩ 15 Hz forward 15 s | **Clench:** play/pause | ← →; `J` tap |
+The flicker rates are the best well-spaced rates from the real session; each profile can change them.
 
-`J` behaves like your jaw: tap = clench, two quick taps = double clench, hold 1 s = held clench.
-The keyboard always works, so a live demo still runs if the EEG is noisy.
+| Tab | Look at an arrow | Jaw | Big buttons | Keyboard backup |
+|-----|------------------|-----|-------------|-----------------|
+| 📄 **Read** (PDF) | ▲ 13 Hz, ▶ 9 Hz, ▼ 15 Hz, ◀ 11 Hz to scroll; past the edge turns the page | **Double clench:** arrows on/off. **Hold ~1 s:** zoom in/out | Previous page · Zoom · Arrows on/off · Next page | Arrow keys; `J` tap twice / hold |
+| 🎵 **Listen** (audio) | none | **Double clench:** play/pause. **Single clench:** back 15 s | Back 15 s · Play/Pause · Forward 15 s | `J` tap twice / tap once |
+| 🎬 **Watch** (video) | ⏪ 9 Hz back 15 s, ⏩ 13 Hz forward 15 s | **Clench:** play/pause | Back 15 s · Play/Pause · Forward 15 s | ← →; `J` tap |
+
+- **📂 Open file** (or drag a file onto the window) opens your own PDF, audio (mp3, wav, m4a…) or
+  video (mp4, mov…). The last file of each kind is remembered per profile.
+- The viewer only switches on the inputs it uses (flicker + jaw), so other detectors can't
+  steal events. On the real recording, clenching also tensed the forehead, and without this
+  every clench was read as an eyebrow raise.
+- `J` behaves like your jaw: tap = clench, two quick taps = double clench, hold 1 s = held clench.
+  The keyboard and big buttons always work, so a live demo still runs if the EEG is noisy.
 
 ## Setup
 
@@ -134,13 +159,20 @@ re-clones never touch it):
 ```
 profiles/<name>.json        settings + latest result per input + full history of every session
 profiles/<name>.json.bak    the previous version of that file
-trials/<name>/<date>_calibration|test/
-    eeg.npz                 raw EEG, timestamps, channel names, sample rate
-    features.csv            signal features, 25 rows per second
-    cues.csv / events.csv   what the wearer was asked to do / what the app detected
-    results.json            the scores
+trials/<name>/<date>_calibration|test[_partial]/
 trials/index.csv            one row per input per session: the "what works" log
 ```
+
+| File in each trial folder | Format | Contents | Open with |
+|---|---|---|---|
+| `eeg.npz` | NumPy compressed archive | raw EEG (samples × channels), timestamps, channel names, sample rate | Python `numpy.load`, `reanalyze.py` |
+| `eeg.csv` (optional) | CSV | time + one column per channel (`reanalyze.py latest --csv`) | Excel, MATLAB, anything |
+| `cues.csv` | CSV | what the wearer was asked to do, and when | Excel |
+| `events.csv` | CSV | what the app detected, and when | Excel |
+| `features.csv` | CSV | processed signals, 25 rows per second | Excel |
+| `results.json` | JSON | scores, verdicts, settings used, app version, shuffle seed | text editor |
+
+ANT's eego software saves its own copy of a session as `.cnt` / `.edf` (standard EEG formats).
 
 Profiles record the app version that made each result and carry a schema version, so
 newer app versions can still read them.
@@ -176,11 +208,14 @@ bci_demo/
 
 ## Status
 
-- Working end to end against the **simulated** headset (calibration, live test, viewer).
-- Not yet tested on the real eego. Calibrate each wearer on the real headset; the live
-  test then shows which inputs actually work for them.
+- **Real headset:** connects to ANT's eego stream (and reconnects by itself when eego restarts
+  its stream, which plain LSL can't do for this stream). Flicker and jaw proven on one wearer's
+  recording; the viewer driven by that recording works end to end (see *Results on a real brain*).
+- **Not yet done:** the viewer used live by a wearer; more than one person; retesting blink,
+  glance and eyebrows with spoken cues and a settled headset.
+- Everything also runs on the practice headset (calibration, live test, viewer).
 
 ## Safety
 
-The arrows flicker at 12–15 Hz. Flicker in this range can trigger seizures in people with
+The arrows flicker at 8–19 Hz. Flicker in this range can trigger seizures in people with
 photosensitive epilepsy. Don't use it if that applies to you or anyone watching.
