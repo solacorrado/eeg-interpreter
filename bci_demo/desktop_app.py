@@ -188,6 +188,7 @@ TAB_ACTS = {"pdf": ["up", "right", "down", "left"], "audio": [], "video": ["back
 PDF_KEYS = {Qt.Key_Up: "up", Qt.Key_Right: "right", Qt.Key_Down: "down", Qt.Key_Left: "left"}
 VIDEO_KEYS = {Qt.Key_Left: "back", Qt.Key_Right: "fwd"}
 DOUBLE_MS, HOLD_MS, ZOOM_IN = 1500, 1000, 2.5
+SEQ_GAP_MS = 1000  # Listen/Watch: how long to wait for another clench before acting
 
 
 class FlickerTarget(QWidget):
@@ -437,14 +438,16 @@ HELP = {
         ("😌", "Relax your face while reading", "Frowning or tensing hard can count as a clench."),
     ]),
     "audio": ("🎵  Listening", [
-        ("😬", "Clench your jaw once", "Play or pause."),
-        ("⏱", "Hold a jaw clench for about 1 second", "Go back 15 seconds."),
+        ("😬", "Clench your jaw once", "Play or pause (it waits about 1 second to see if more clenches follow)."),
+        ("⏪", "Clench twice", "Back 15 seconds. Hold the 2nd clench to keep going back, every second."),
+        ("⏩", "Clench three times", "Forward 15 seconds. Hold the 3rd clench to keep going forward."),
         ("😌", "Relax your face between clenches", "Tensing hard can count as a clench."),
     ]),
     "video": ("🎬  Watching", [
         ("👀", "Look at the glowing ⏪ (left) or ⏩ (right) for 1–2 s", "Skips back or forward 15 seconds."),
-        ("😬", "Clench your jaw once", "Play or pause."),
-        ("⏱", "Hold a jaw clench for about 1 second", "Go back 15 seconds."),
+        ("😬", "Clench your jaw once", "Play or pause (it waits about 1 second to see if more clenches follow)."),
+        ("⏪", "Clench twice", "Back 15 seconds. Hold the 2nd clench to keep going back, every second."),
+        ("⏩", "Clench three times", "Forward 15 seconds. Hold the 3rd clench to keep going forward."),
     ]),
 }
 HELP_BLINK = {
@@ -464,10 +467,26 @@ HELP_BLINK = {
         ("😌", "Close your eyes for about 1 second", "Go back 15 seconds."),
     ]),
 }
+HELP_ROLL = {
+    "pdf": ("📄  Reading a PDF (eye roll, experimental)", [
+        ("👀", "Look at a glowing arrow for 1–2 seconds", "The page scrolls that way. Past the edge, it turns the page."),
+        ("🙄", "Roll your eyes in one full circle", "Turns the arrows off (read without flicker) — or back on."),
+        ("😌", "Close your eyes for about 1 second", "Zooms in. Do it again to zoom out."),
+    ]),
+    "audio": ("🎵  Listening (eye roll, experimental)", [
+        ("🙄", "Roll your eyes in one full circle", "Play or pause."),
+        ("😌", "Close your eyes for about 1 second", "Go back 15 seconds."),
+    ]),
+    "video": ("🎬  Watching (eye roll, experimental)", [
+        ("👀", "Look at the glowing ⏪ (left) or ⏩ (right) for 1–2 s", "Skips back or forward 15 seconds."),
+        ("🙄", "Roll your eyes in one full circle", "Play or pause."),
+        ("😌", "Close your eyes for about 1 second", "Go back 15 seconds."),
+    ]),
+}
 HELP_COMMON = [
-    ("🖱", "Big buttons at the bottom", "Do the same things with a click — for helpers, or as a backup."),
+    ("🖱", "Click instead", "Click an arrow tile, or the big buttons on Listen / Watch — for helpers, or as a backup."),
     ("📂", "Open file (or drag one onto the window)", "Use your own PDF, audio or video."),
-    ("⌨", "Keyboard backup", "Arrow keys = look at an arrow · J = jaw (tap, tap twice, hold)."),
+    ("⌨", "Keyboard backup", "Arrow keys = look at an arrow · J = jaw (tap 1, 2 or 3 times; hold)."),
 ]
 
 
@@ -528,7 +547,7 @@ class HelpOverlay(QFrame):
 
     def set_tab(self, tab, mode="jaw"):
         self._clear()
-        title, rows = (HELP_BLINK if mode == "blink" else HELP)[tab]
+        title, rows = {"blink": HELP_BLINK, "roll": HELP_ROLL}.get(mode, HELP)[tab]
         self.lay.addWidget(QLabel(f"How to use — {title}", objectName="helptitle"))
         for r in rows:
             self._row(*r)
@@ -617,10 +636,10 @@ class ViewerPage(QWidget):
         al = QHBoxLayout()
         al.addWidget(QLabel("Action input"))
         self.mode_box = QComboBox()
-        self.mode_box.addItems(["Jaw clench", "Blinks"])
+        self.mode_box.addItems(["Jaw clench", "Blinks", "Eye roll (experimental)"])
         self.mode_box.setToolTip("Blinks: double blink = the main action, close eyes ~1 s = the 'hold' action")
         self.mode_box.setFocusPolicy(Qt.NoFocus)
-        self.mode_box.currentIndexChanged.connect(lambda i: self.set_mode(["jaw", "blink"][i]))
+        self.mode_box.currentIndexChanged.connect(lambda i: self.set_mode(["jaw", "blink", "roll"][i]))
         al.addWidget(self.mode_box, 1)
         sv.addLayout(al)
         fl = QHBoxLayout()
@@ -662,6 +681,9 @@ class ViewerPage(QWidget):
         self.toast_timer = QTimer(self, singleShot=True, timeout=self.toast_label.hide)
         self.single_timer = QTimer(self, singleShot=True, timeout=self.audio_back)
         self.hold_timer = QTimer(self, singleShot=True, timeout=self.j_hold_fired)
+        self.seq_n, self.seq_last_end, self.seq_holding, self.repeat_dir = 0, -1e9, False, 0
+        self.seq_timer = QTimer(self, singleShot=True, timeout=self.seq_commit)
+        self.repeat_timer = QTimer(self, interval=1000, timeout=lambda: self.media_skip(self.repeat_dir))
 
     # ---------- building
     @staticmethod
@@ -712,13 +734,7 @@ class ViewerPage(QWidget):
         g.setRowStretch(1, 1)
         g.setColumnStretch(1, 1)
         v.addLayout(g, 1)
-        self.btn_arrows = self.big_button("👁  Arrows: ON", lambda: self.set_arrows(not self.pdf.arrows_on))
-        v.addLayout(self.controls([
-            self.big_button("⟨  Previous page", lambda: self.pdf.go_page(self.pdf.page - 1)),
-            self.big_button("🔍  Zoom in / out", self.zoom_button),
-            self.btn_arrows,
-            self.big_button("Next page  ⟩", lambda: self.pdf.go_page(self.pdf.page + 1)),
-        ]))
+        self.btn_arrows = QPushButton()  # (the button row under the PDF was removed to give the page more room)
         return w
 
     def build_audio(self):
@@ -848,15 +864,17 @@ class ViewerPage(QWidget):
         self.mode = mode
         self.main.profile.settings["action_input"] = mode
         # only detect what this mode uses, so other detectors can't steal or invent events
-        self.main.engine.set_inputs({"ssvep", "jaw"} if mode == "jaw" else {"ssvep", "blink", "eyes_closed"})
+        self.main.engine.set_inputs({"jaw": {"ssvep", "jaw"}, "blink": {"ssvep", "blink", "eyes_closed"},
+                                     "roll": {"ssvep", "eye_roll", "eyes_closed"}}[mode])
         self.mode_box.blockSignals(True)
-        self.mode_box.setCurrentIndex(0 if mode == "jaw" else 1)
+        self.mode_box.setCurrentIndex(["jaw", "blink", "roll"].index(mode))
         self.mode_box.blockSignals(False)
         if self.help.isVisible():
             self.help.set_tab(self.tab, mode)
         if announce:
-            self.toast("Action input: jaw clench" if mode == "jaw" else
-                       "Action input: blinks (double blink · close eyes 1 s)")
+            self.toast({"jaw": "Action input: jaw clench",
+                        "blink": "Action input: blinks (double blink · close eyes 1 s)",
+                        "roll": "Action input: eye roll, experimental (roll · close eyes 1 s)"}[mode])
 
     def activate(self):
         s = self.main.profile.settings
@@ -940,6 +958,11 @@ class ViewerPage(QWidget):
             "video": "Look at a glowing arrow to skip 15 s · jaw: clench = play / pause, hold = back 15 s"}[name])
         if self.mode == "blink":
             self.hint.setText("Blinks: blink twice = main action · close eyes ~1 s = hold action")
+        elif self.mode == "roll":
+            self.hint.setText("Eye roll: roll = main action · close eyes ~1 s = hold action")
+        self.seq_timer.stop()
+        self.repeat_timer.stop()
+        self.seq_n = 0
         if self.help.isVisible():
             self.help.set_tab(name, self.mode)
         self.send_targets()
@@ -1013,14 +1036,59 @@ class ViewerPage(QWidget):
         else:
             self.toast(f"Clench → {self.toggle(self.video)}")
 
-    def blink_action(self):
-        """Blink mode, double blink = the main action (what one clench / a double clench does)."""
+    def blink_action(self, label="Double blink"):
+        """Blink / eye-roll mode: the main action (what one clench / a double clench does)."""
         if self.tab == "pdf":
             self.set_arrows(not self.pdf.arrows_on)
         elif self.tab == "audio":
-            self.toast(f"Double blink → {self.toggle(self.audio)}")
+            self.toast(f"{label} → {self.toggle(self.audio)}")
         else:
-            self.toast(f"Double blink → {self.toggle(self.video)}")
+            self.toast(f"{label} → {self.toggle(self.video)}")
+
+    # ---------- Listen / Watch jaw patterns: 1 = play/pause, 2 = back 15 s, 3 = forward 15 s,
+    #            holding the 2nd / 3rd clench keeps skipping every second until you let go
+    def media_player(self):
+        return self.audio if self.tab == "audio" else self.video
+
+    def media_skip(self, d):
+        self.skip(self.media_player(), 15000 * d)
+        self.toast("⏩  Forward 15 s" if d > 0 else "⏪  Back 15 s")
+
+    def media_start(self):
+        now = time.monotonic()
+        if now - self.seq_last_end > SEQ_GAP_MS / 1000:
+            self.seq_n = 0
+        self.seq_timer.stop()
+        self.seq_n += 1
+        self.seq_holding = False
+
+    def media_hold(self):
+        if self.seq_n >= 2:  # holding the 2nd (back) or 3rd (forward) clench: keep skipping
+            self.seq_holding = True
+            self.repeat_dir = -1 if self.seq_n == 2 else 1
+            self.media_skip(self.repeat_dir)
+            self.repeat_timer.start()
+
+    def media_release(self):
+        self.seq_last_end = time.monotonic()
+        if self.seq_holding:
+            self.repeat_timer.stop()
+            self.seq_holding, self.seq_n = False, 0
+            return
+        if self.seq_n >= 3:
+            self.seq_n = 0
+            self.media_skip(+1)
+            return
+        self.seq_timer.start(SEQ_GAP_MS)  # wait: is another clench coming?
+        self.toast("1 clench…  (2 = back 15 s · 3 = forward 15 s)" if self.seq_n == 1 else
+                   "2 clenches…  (one more = forward 15 s)")
+
+    def seq_commit(self):
+        n, self.seq_n = self.seq_n, 0
+        if n == 1:
+            self.toast(f"Clench → {self.toggle(self.media_player())}")
+        elif n == 2:
+            self.media_skip(-1)
 
     def blink_hold(self):
         """Blink mode, eyes closed ~1 s = the 'hold' action."""
@@ -1049,13 +1117,19 @@ class ViewerPage(QWidget):
             self.status.setText(status_html(m, compact=True))
         elif not self.isVisible():
             return
+        elif self.mode == "jaw" and self.tab in ("audio", "video") and t in (
+                "clench_start", "hold", "clench", "clench_end"):
+            {"clench_start": self.media_start, "hold": self.media_hold,
+             "clench": self.media_release, "clench_end": self.media_release}[t]()
         elif t == "clench" and self.mode == "jaw":
             self.clench()
         elif t == "hold" and self.mode == "jaw":
             self.hold()
         elif t == "double_blink" and self.mode == "blink":
             self.blink_action()
-        elif t == "eyes_closed" and self.mode == "blink":
+        elif t == "eye_roll" and self.mode == "roll":
+            self.blink_action("Eye roll")
+        elif t == "eyes_closed" and self.mode in ("blink", "roll"):
             self.blink_hold()
         elif t == "ssvep":
             for a in TAB_ACTS[self.tab]:
@@ -1081,6 +1155,8 @@ class ViewerPage(QWidget):
                 if via_eeg:
                     fake.start("clench")
                 else:
+                    if self.tab in ("audio", "video"):
+                        self.media_start()
                     self.hold_timer.start(HOLD_MS)
             elif not press and self.j_down:
                 self.j_down = False
@@ -1088,7 +1164,9 @@ class ViewerPage(QWidget):
                     fake.stop("clench")
                 else:
                     self.hold_timer.stop()
-                    if not self.j_held:
+                    if self.tab in ("audio", "video"):
+                        self.media_release()
+                    elif not self.j_held:
                         self.clench()
             return True
         if key in keymap:
@@ -1111,7 +1189,10 @@ class ViewerPage(QWidget):
     def j_hold_fired(self):
         if self.j_down:
             self.j_held = True
-            self.hold()
+            if self.tab in ("audio", "video"):
+                self.media_hold()
+            else:
+                self.hold()
 
 
 # =========================================================================== calibration widgets
@@ -1397,8 +1478,8 @@ class CalibPage(QWidget):
         lv.addWidget(self.total)
         lv.addSpacing(8)
         self.btn_quick = QPushButton("⚡ Quick: flicker · blink · jaw", objectName="primary")
-        self.btn_quick.setToolTip("Only the flicker rates the viewer uses, then blinks, then jaw clench, "
-                                  "in that order (about 4 min with the voice)")
+        self.btn_quick.setToolTip("Only the flicker rates the viewer uses, then blinks, then jaw clench "
+                                  "(+ eye roll when that's the action input), in that order (~4 min)")
         self.btn_quick.clicked.connect(self.start_quick)
         self.btn_cal = QPushButton("Full calibration (ticked inputs)")
         self.btn_roll = QPushButton("👁  Eye roll calibration (experimental)")
@@ -1563,10 +1644,15 @@ class CalibPage(QWidget):
             cb.setChecked(k == "eye_roll")
         self.start_session("calibration")
 
+    def quick_inputs(self):
+        extra = ["eye_roll"] if self.main.profile.settings.get("action_input") == "roll" else []
+        return ["ssvep", "blink", "jaw"] + extra
+
     def start_quick(self):
-        """Only what the viewer uses: its flicker rates, then blinks, then jaw, in that order."""
+        """Only what the viewer uses: its flicker rates, then blinks, then jaw (+ eye roll if that's
+        the chosen action input), in that order."""
         for k, cb in self.checks.items():
-            cb.setChecked(k in ("ssvep", "blink", "jaw"))
+            cb.setChecked(k in self.quick_inputs())
         self.start_session("calibration", quick=True)
 
     def start_session(self, kind, quick=False):
@@ -1574,7 +1660,7 @@ class CalibPage(QWidget):
         if not eng.status.get("connected"):
             QMessageBox.warning(self, "No headset", "Connect a headset on the start screen first.")
             return
-        inputs = ["ssvep", "blink", "jaw"] if quick else self.selected()
+        inputs = self.quick_inputs() if quick else self.selected()
         self.kind, self.quick = kind, quick
         self.seed = random.randrange(1_000_000)  # saved with the trial, so the order can be reproduced
         freqs = self.viewer_rates() if quick else C.SSVEP_FREQS
