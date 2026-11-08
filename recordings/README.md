@@ -44,6 +44,27 @@ uv run python bci_demo/reanalyze.py recordings/wearer1/20261107-164627_calibrati
 uv run python bci_demo/reanalyze.py recordings/wearer2/20261107-171911_calibration --csv   # also writes eeg.csv
 ```
 
+## Raw eego recordings (`wearer1/eego_20261108/`)
+
+Two sessions recorded directly in ANT's eego software on 8 Nov 2026 (not through the app), in
+eego's native format. The name in each file's header is replaced with `wearer1` (subject ID `0001`).
+
+| File | Length | Notes |
+|---|---|---|
+| `wearer1_2026-11-08_10-47-53.cnt` | 2.5 min | clean throughout (~32 µV after a 1–40 Hz filter) |
+| `wearer1_2026-11-08_10-54-42.cnt` | 8.7 min | clean for the first ~7 min; the last ~1.5 min have very large artifacts (likely the cap being moved or unplugged) |
+
+24 channels (same cap layout as above, no trigger channel), 500 Hz. The `.evt` files hold only
+electrode-impedance checks (at the start and end, and twice during the second file, which splits it
+into the 3 segments listed in its `.seg` file). The task being done is not recorded in the files.
+
+Open them in Python with MNE:
+
+```python
+import mne
+raw = mne.io.read_raw_ant("recordings/wearer1/eego_20261108/wearer1_2026-11-08_10-54-42.cnt", preload=True)
+```
+
 ## Results (calibration scores, current code)
 
 Balanced accuracy separating "doing it" from "resting": Good ≥ 90%, OK ≥ 75%, Poor below.
